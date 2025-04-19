@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 // Removed Link import as it will be handled within ChatList
 // Removed InternalDebateSummary import for now, will be moved to ChatList
 // Removed local DebateSummary interface and formatDateTime function - already removed
@@ -13,11 +14,45 @@ import ChatView from '@/components/ChatView'; // Import the actual ChatView comp
 import { InternalDebateSummary } from '@/types';
 
 export default function Home() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   // State related to selected chat/debate will be needed here
   const [selectedDebateId, setSelectedDebateId] = useState<string | null>(null);
   // Optional: Store selected debate title for the header
   const [selectedDebateTitle, setSelectedDebateTitle] = useState<string | null>(null);
   const [selectedDebateHouse, setSelectedDebateHouse] = useState<string | null>(null);
+
+  // Effect to sync state with URL query parameters
+  useEffect(() => {
+    const debateIdFromUrl = searchParams.get('debateId');
+
+    if (debateIdFromUrl) {
+      if (debateIdFromUrl !== selectedDebateId) {
+        console.log("Setting debate from URL:", debateIdFromUrl);
+        setSelectedDebateId(debateIdFromUrl);
+        // TODO: Fetch title and house based on debateIdFromUrl if not available
+        // For now, clear them if the ID changes via URL directly
+        // If the selection came from handleSelectDebate, title/house are already set
+        // This logic might need refinement depending on how title/house are fetched/passed
+        if (!selectedDebateTitle || !selectedDebateHouse) { // Basic check
+           setSelectedDebateTitle(null); // Clear stale title
+           setSelectedDebateHouse(null); // Clear stale house
+           // Ideally, trigger a fetch here: fetchDebateDetails(debateIdFromUrl);
+        }
+      }
+    } else {
+      // If no debateId in URL, clear selection
+      if (selectedDebateId !== null) {
+        console.log("Clearing debate selection as URL param is missing.");
+        setSelectedDebateId(null);
+        setSelectedDebateTitle(null);
+        setSelectedDebateHouse(null);
+      }
+    }
+    // Depend on searchParams to re-run when URL query changes
+    // Also depend on selectedDebateId to avoid unnecessary runs if the ID is already correct
+  }, [searchParams, selectedDebateId]);
 
   // Existing state and fetch logic will be moved to ChatList component
   // const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
@@ -28,14 +63,16 @@ export default function Home() {
   // useEffect(() => { fetchDebates(); }, []);
   // const handleSearch = ...
 
-  // Update handler to store title (requires ChatList to pass more data or fetch here)
-  // For simplicity, let's assume ChatList can pass the summary object
+  // Update handler to push URL state and update local state
   const handleSelectDebate = (debateSummary: InternalDebateSummary) => {
     console.log("Selected Debate:", debateSummary.id, debateSummary.title);
+    const newUrl = `/?debateId=${debateSummary.id}`;
+    // Update URL without full page reload
+    router.push(newUrl, { scroll: false });
+    // Set state immediately for responsiveness (effect will sync if needed)
     setSelectedDebateId(debateSummary.id);
     setSelectedDebateTitle(debateSummary.title);
     setSelectedDebateHouse(debateSummary.house); // Store house as well
-    // Alternatively, fetch title/details here based on ID
   };
 
   return (
@@ -52,7 +89,7 @@ export default function Home() {
       </div>
 
       {/* Main Chat View */}
-      <div className="flex-grow flex flex-col bg-[#0b141a]" style={{backgroundImage: "url('/whatsapp-bg.png')", backgroundSize: 'contain', backgroundPosition: 'center'}}>
+      <div className="flex-grow flex flex-col bg-[#0b141a] overflow-hidden" style={{backgroundImage: "url('/whatsapp-bg.png')", backgroundSize: 'contain', backgroundPosition: 'center'}}>
         {selectedDebateId ? (
           <>
             {/* Header for the selected chat/debate */}
@@ -60,9 +97,9 @@ export default function Home() {
                {/* Placeholder Avatar */}
                <div className="w-10 h-10 bg-gray-600 rounded-full flex-shrink-0"></div>
                <div className="flex-grow">
-                  <h2 className="font-semibold text-md text-gray-100">{selectedDebateTitle || `Debate ${selectedDebateId}`}</h2>
+                  <h2 className="font-semibold text-md text-gray-100">{selectedDebateTitle || (selectedDebateId ? `Loading details...` : `Debate ${selectedDebateId}`)}</h2>
                   {/* Optionally show house or other info */}
-                  <p className="text-xs text-gray-400">{selectedDebateHouse || 'House details unavailable'}</p>
+                  <p className="text-xs text-gray-400">{selectedDebateHouse || (selectedDebateId ? '...' : 'House details unavailable')}</p>
                </div>
                {/* Placeholder Icons (Search, More options) */}
                <div className="flex gap-4 text-gray-400">
@@ -76,8 +113,10 @@ export default function Home() {
                  </svg>
                </div>
             </header>
-            {/* Use ChatView component */}
-            <ChatView debateId={selectedDebateId} />
+            {/* Wrapper for ChatView to handle scrolling */}
+            <div className="flex-1 overflow-y-auto">
+              <ChatView debateId={selectedDebateId} />
+            </div>
             {/* Footer (Chat Input Area) */}
             <footer className="p-3 border-t border-gray-700 bg-[#202c33] flex items-center gap-3 z-10">
               {/* Placeholder Icons (Emoji, Attach) */}
