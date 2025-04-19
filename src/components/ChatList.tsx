@@ -7,9 +7,10 @@ import { SearchResult, DebateSummary } from '@/lib/hansard/types';
 
 interface ChatListProps {
   onSelectDebate: (debateSummary: InternalDebateSummary) => void;
+  selectedDebateId: string | null;
 }
 
-export default function ChatList({ onSelectDebate }: ChatListProps) {
+export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListProps) {
   const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -206,34 +207,35 @@ export default function ChatList({ onSelectDebate }: ChatListProps) {
           <p className="p-4 text-center text-gray-400">No debates found for the selected criteria.</p>
         )}
         {/* Debate Items */}
-        {debates.map((debate) => (
-          <div
-            key={debate.id}
-            onClick={() => onSelectDebate(debate)}
-            className="p-3 hover:bg-[#2a3942] cursor-pointer transition-colors duration-150 flex items-center gap-3"
-          >
-            {/* Placeholder for Avatar/Icon */}
-            <div className="w-10 h-10 bg-gray-600 rounded-full flex-shrink-0"></div>
-            <div className="flex-grow overflow-hidden">
-              <div className="flex justify-between items-center mb-1">
-                <h3 className="font-semibold text-gray-100 truncate" title={debate.title}>{debate.title}</h3>
-                <span className="text-xs text-gray-400 whitespace-nowrap ml-2">{debate.date}</span>
+        {debates.map((debate) => {
+          const isSelected = debate.id === selectedDebateId; // Check if this debate is selected
+          return (
+              <div
+                key={debate.id}
+                onClick={() => onSelectDebate(debate)}
+                className={`p-3 cursor-pointer transition-colors duration-150 flex items-center gap-3 ${isSelected ? 'bg-teal-800' : 'hover:bg-[#2a3942]'}`}
+              >
+                {/* Placeholder for Avatar/Icon */}
+                <div className="w-10 h-10 bg-gray-600 rounded-full flex-shrink-0"></div>
+                <div className="flex-grow overflow-hidden">
+                  <div className="flex justify-between items-center mb-1">
+                    <h3 className="font-semibold text-gray-100 truncate" title={debate.title}>{debate.title}</h3>
+                    <span className="text-xs text-gray-400 whitespace-nowrap ml-2">{debate.date}</span>
+                  </div>
+                  <div className="text-sm text-gray-400 truncate flex justify-between">
+                     <span>{debate.house}</span>
+                     {debate.match && (
+                       <span className="text-xs text-teal-400 italic ml-2">Match</span>
+                     )}
+                  </div>
+                  {/* Uncomment if you want to show the match snippet in the list */}
+                  {/* {debate.match && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 italic truncate">...{debate.match}...</p>
+                  )} */}
+                </div>
               </div>
-              <div className="text-sm text-gray-400 truncate flex justify-between">
-                 <span>{debate.house}</span>
-                 {debate.match && (
-                   <span className="text-xs text-teal-400 italic ml-2">Match</span>
-                 )}
-              </div>
-              {/* Uncomment if you want to show the match snippet in the list */}
-              {/* {debate.match && (
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 italic truncate">...{debate.match}...</p>
-              )} */}
-            </div>
-          </div>
-          // Keep Link for potential future use or direct navigation, but onClick handles selection for view update
-          // <Link key={debate.id} href={`/debate/${debate.id}`} passHref> ... </Link> // Original Link wrapping
-        ))}
+          );
+        })}
 
         {/* Loading More Indicator (at the bottom) */}
         {isLoading && debates.length > 0 && <p className="p-4 text-center text-gray-400">Loading more...</p>}
