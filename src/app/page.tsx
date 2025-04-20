@@ -8,16 +8,12 @@ import { Resizable } from 're-resizable'; // Import Resizable
 import ChatList from '@/components/ChatList';
 import ChatView from '@/components/ChatView';
 import OriginalContribution from '@/components/OriginalContribution'; // Import new component
+import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the icon
 
 // Import types
-import { InternalDebateSummary } from '@/types';
+import { InternalDebateSummary, DebateMetadata } from '@/types';
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types'; // Import necessary types
 import { Speech } from '@/components/ChatView'; // Import Speech type
-
-// Helper function for escaping regex characters
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&'); // $& means the whole matched string
-}
 
 export default function Home() {
   const router = useRouter();
@@ -35,6 +31,11 @@ export default function Home() {
   const [originalDebate, setOriginalDebate] = useState<DebateResponse | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [errorOriginal, setErrorOriginal] = useState<string | null>(null);
+
+  // Selected Debate Metadata state
+  const [selectedDebateMetadata, setSelectedDebateMetadata] = useState<DebateMetadata | null>(null);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+  const [errorMetadata, setErrorMetadata] = useState<string | null>(null);
 
   // Resizable Panel state
   const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null); // Moved from ChatView
@@ -73,19 +74,61 @@ export default function Home() {
       }
     }, [originalDebate, isLoadingOriginal]);
 
-  // Effect to sync selectedDebateId from URL
+  // Fetch Metadata for Selected Debate
+  const fetchSelectedDebateMetadata = useCallback(async (debateId: string) => {
+      console.log(`[page.tsx] Fetching METADATA for debate ${debateId}`);
+      setIsLoadingMetadata(true);
+      setErrorMetadata(null);
+      setSelectedDebateMetadata(null); // Clear previous metadata
+      try {
+          const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
+          if (!response.ok) {
+              let errorMsg = `Metadata fetch failed: ${response.status}`;
+              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) { }
+              throw new Error(errorMsg);
+          }
+          const metadata: DebateMetadata = await response.json(); // Assuming API returns DebateMetadata directly
+          setSelectedDebateMetadata(metadata);
+      } catch (e: any) {
+          console.error(`[page.tsx] Failed fetch metadata ${debateId}:`, e);
+          setErrorMetadata(e.message || 'Failed to load metadata');
+      } finally {
+          setIsLoadingMetadata(false);
+      }
+  }, []);
+
+  // Effect to sync selectedDebateId from URL and fetch data
   useEffect(() => {
     const debateIdFromUrl = searchParams.get('debateId');
-    if (debateIdFromUrl && debateIdFromUrl !== selectedDebateId) {
-      console.log(`Setting selectedDebateId from URL: ${debateIdFromUrl}`);
-      setSelectedDebateId(debateIdFromUrl);
-      // Reset summary and panel state if ID changes from URL
-      // setSelectedDebateSummary(null); // Keep summary if navigating internally
-      setSelectedOriginalIndex(null);
-      fetchOriginalDebate(debateIdFromUrl); // Fetch original data immediately
+    if (debateIdFromUrl) {
+        if (debateIdFromUrl !== selectedDebateId) {
+             console.log(`Setting selectedDebateId from URL: ${debateIdFromUrl}`);
+             setSelectedDebateId(debateIdFromUrl);
+             // Reset relevant states when ID changes fundamentally
+             setOriginalDebate(null);
+             setIsLoadingOriginal(false);
+             setErrorOriginal(null);
+             setSelectedOriginalIndex(null);
+             setSelectedDebateMetadata(null); // Clear metadata too
+             setIsLoadingMetadata(false);
+             setErrorMetadata(null);
+             // Trigger fetches for the new ID
+             fetchOriginalDebate(debateIdFromUrl);
+             fetchSelectedDebateMetadata(debateIdFromUrl);
+        }
+    } else {
+        // Clear state if no debateId in URL
+        setSelectedDebateId(null);
+        setSelectedDebateSummary(null);
+        setOriginalDebate(null);
+        setErrorOriginal(null);
+        setSelectedOriginalIndex(null);
+        setSelectedDebateMetadata(null);
+        setErrorMetadata(null);
     }
+    // Only run when searchParams changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, fetchOriginalDebate]); // Added fetchOriginalDebate dependency
+  }, [searchParams, fetchOriginalDebate, fetchSelectedDebateMetadata]); // Add fetch functions as dependencies
 
   // Fetch Original Debate Data
   const fetchOriginalDebateData = useCallback(async (debateId: string | null) => {
@@ -248,9 +291,17 @@ export default function Home() {
             {/* Header */}
             <header className="p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10">
                {/* Left Side */}
-               <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 bg-gray-500 rounded-full"></div>
-                 <div className="flex flex-col">
+               <div className="flex items-center gap-3 min-w-0"> {/* Added min-w-0 for better truncation */}
+                 {/* Replace placeholder div with DebateMetadataIcon */}
+                 <DebateMetadataIcon
+                   metadata={{ // Construct the object needed by the icon
+                     ...selectedDebateMetadata,
+                     isLoading: isLoadingMetadata,
+                     error: errorMetadata
+                   }}
+                   size={40} // Standard avatar size
+                 />
+                 <div className="flex flex-col min-w-0"> {/* Added min-w-0 */}
                    <h2 className="text-md font-semibold text-gray-100 truncate" title={selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}>
                      {selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}
                    </h2>
