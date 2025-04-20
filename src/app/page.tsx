@@ -155,11 +155,8 @@ export default function Home() {
   // Fetch Metadata for Selected Debate (incorporates memory & localStorage caching, updates state)
   const fetchSelectedDebateMetadata = useCallback(async (debateId: string) => {
 
-      // 1. Check state cache first (instead of ref)
+      // 1. Check state cache first
       if (metadataCache[debateId]) {
-          // Data already exists in state, no need to check localStorage or fetch
-          // console.log(`[fetchMetadata] State Cache HIT for metadata ${debateId}`);
-          // We might want to ensure loading/error states are correct if they were set previously
           if (metadataCache[debateId].isLoading || metadataCache[debateId].error) {
              setMetadataCache(prev => ({ ...prev, [debateId]: { ...prev[debateId], isLoading: false, error: null } }));
           }
@@ -218,12 +215,7 @@ export default function Home() {
           console.error(`[fetchMetadata] Failed fetch metadata ${debateId}:`, e);
           // Update state cache with error
           setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId] || {}), isLoading: false, error: e.message || 'Failed to load metadata' } }));
-      } finally {
-           // Redundant isLoading set in try/catch, could remove this outer finally block
-           // setIsLoadingMetadata(false); // Removed global loading state dependence
       }
-    // Include metadataCache in dependency array cautiously. If it causes infinite loops,
-    // we might need to use a ref inside the callback or pass the setter.
   }, [metadataCache]);
 
   // Fetch Summary Data
@@ -248,7 +240,7 @@ export default function Home() {
       } finally {
           setIsLoadingSummary(false);
       }
-  }, []); // No dependencies needed as it only uses debateId arg
+  }, []); 
 
   // Callback for ChatList items becoming visible
   const handleChatItemVisible = useCallback((debateId: string) => {
@@ -276,8 +268,6 @@ export default function Home() {
              }
 
              const cachedOriginal = originalDebateCache.current.get(debateIdFromUrl);
-             // ... rest of the useEffect state setting remains largely the same,
-             // but uses the pre-checked cachedMetadata
              setSelectedDebateId(debateIdFromUrl);
  
              // Reset ALL other relevant states immediately
@@ -326,7 +316,7 @@ export default function Home() {
     }
     // Dependencies: Run when URL changes or the selected ID state changes.
     // fetchOriginalDebate and fetchSelectedDebateMetadata are stable due to useCallback.
-  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, fetchSummary, metadataCache]);
+  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, fetchSummary, metadataCache]); // Added metadataCache
 
   // --- SEARCH LOGIC ---
   useEffect(() => {
@@ -484,6 +474,12 @@ export default function Home() {
 
   // Calculate the index of the currently highlighted search result
   const highlightedIndex = currentMatchIndex !== -1 ? searchResults[currentMatchIndex] : null;
+
+  // Stable callback for ChatView to update the parent's ref with rewritten speeches
+  const handleRewrittenDebateUpdate = useCallback((speeches: Speech[]) => {
+    rewrittenDebateRef.current = speeches;
+    // The search useEffect already depends on rewrittenDebateRef, so no need to trigger search here.
+  }, []); // No dependencies needed, it only updates a ref
 
   return (
     <main className="flex h-screen w-screen bg-[#111b21] text-white overflow-hidden relative">
@@ -680,11 +676,7 @@ export default function Home() {
                 onBubbleClick={handleBubbleClick} // Pass handler down
                 searchQuery={searchQuery} // Pass search query
                 highlightedIndex={highlightedIndex} // Pass highlighted item's index
-                onRewrittenDebateUpdate={(speeches) => { // Callback to get current rewritten speeches
-                    rewrittenDebateRef.current = speeches;
-                    // Optionally trigger search re-run if needed during streaming,
-                    // but current useEffect handles data changes already.
-                }}
+                onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback
               />
             </div>
 

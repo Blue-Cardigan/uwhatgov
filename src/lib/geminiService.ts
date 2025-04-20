@@ -90,13 +90,13 @@ import {
   
     // Prompt asking for an array, referencing original index
     const prompt = `
-  You are an AI assistant transforming parliamentary debate transcripts into a casual, modern group chat format, outputting structured JSON.
+  You are an AI assistant transforming UK parliamentary debate transcripts into a casual, modern group chat format, outputting structured JSON.
   
   **Task:** Rewrite the following debate transcript segment(s) into a sequence of chat messages.
   *   Process the provided transcript text.
   *   For each contribution or significant narrative point, create a JSON object with "speaker", "text", "originalIndex", and "originalSnippet" fields.
-  *   Use the actual speaker's name or "System/Narrative".
-  *   Rewrite the "text" concisely and informally for a chat context.
+  *   Use the actual speaker's name or "Speaker" if the speaker is not known.
+  *   Rewrite the "text" concisely and informally for a chat context, using British English spelling.
   *   The "originalIndex" MUST correspond to the original index of the Hansard item from the FULL debate transcript. The first item provided to you corresponds to original index ${startIndex}.
   *   The "originalSnippet" MUST be the first 15 words of the original text for that item.
   *   Maintain the original order of contributions.

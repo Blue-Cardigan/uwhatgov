@@ -71,8 +71,10 @@ const ChatView = forwardRef(({
   const SPEECH_DISPLAY_DELAY_MS = 750;
 
   const [typingSpeakerInfo, setTypingSpeakerInfo] = useState<{ speaker: string, party: string | null } | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true); // State to track scroll position
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
   const eventSourceRef = useRef<EventSource | null>(null);
   const persistAttemptedRef = useRef<boolean>(false);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -502,22 +504,24 @@ const ChatView = forwardRef(({
       eventSourceRef.current?.close();
       console.log(`SSE closed for ${debateId} on cleanup`);
     };
-  }, [debateId, connectEventSource, onRewrittenDebateUpdate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debateId, onRewrittenDebateUpdate]); // Removed connectEventSource
 
   const handleBubbleClickInternal = useCallback((index: number | undefined) => {
       console.log(`[ChatView] Bubble click index: ${index}. Calling parent.`);
       onBubbleClick(index); // Call the callback passed from parent
   }, [onBubbleClick]);
 
+  // Effect to automatically scroll down during streaming if near the bottom
   useEffect(() => {
     const timer = setTimeout(() => {
-      // Only auto-scroll to end if not searching/highlighting
-      if (highlightedIndex === null && !typingSpeakerInfo) {
-          chatEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'smooth' : 'auto' });
+      // Only auto-scroll to end if streaming and user is near the bottom
+      if (isStreaming && isNearBottom) {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
-    }, 100);
+    }, 100); // Small delay to allow render
     return () => clearTimeout(timer);
-  }, [rewrittenDebate?.speeches, originalDebateData?.Items, isStreaming, viewMode, highlightedIndex, typingSpeakerInfo]);
+  }, [rewrittenDebate?.speeches, isStreaming, isNearBottom]); // Depend on speeches, streaming status, and scroll position
 
   // Function to get party from cache or fetch it
   const getOrFetchParty = useCallback(async (memberId: number, baseName: string): Promise<string | null> => {
@@ -691,6 +695,27 @@ const ChatView = forwardRef(({
 
   }, [rewrittenDebate?.speeches, originalDebateData?.Items, speakerPartyMap, getOrFetchParty]); // Added dependencies
 
+  // Effect to handle scrolling and update isNearBottom state
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const SCROLL_THRESHOLD = 50; // Pixels from bottom to consider 'near'
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const nearBottom = scrollHeight - scrollTop - clientHeight < SCROLL_THRESHOLD;
+      setIsNearBottom(nearBottom);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll(); // Initial check
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, []); // Run only once on mount
+
   const renderContent = () => {
       if (!debateId) {
           return <div className="p-4 text-center text-gray-400">Select a debate to view.</div>;
@@ -790,8 +815,9 @@ const ChatView = forwardRef(({
   };
 
   return (
-    <div className="flex flex-col bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200">
-       <div className="flex-grow overflow-y-auto p-4 space-y-4">
+    <div className="flex flex-col h-full relative bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200">
+      {/* Scrollable chat content area */}
+      <div ref={scrollContainerRef} className="flex-grow overflow-y-auto p-4 space-y-4">
         {renderContent()}
         <div className="h-8 px-4 pb-4 flex items-center">
           {typingSpeakerInfo && (
@@ -803,6 +829,20 @@ const ChatView = forwardRef(({
         </div>
         <div ref={chatEndRef} />
       </div>
+
+      {/* Jump to Bottom Button */}
+      {!isNearBottom && (
+        <button
+          onClick={() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+          className="absolute bottom-6 right-6 z-10 p-2 bg-gray-700 rounded-full text-gray-300 hover:bg-gray-600 hover:text-white transition-opacity duration-200"
+          title="Jump to bottom"
+        >
+          {/* Simple Down Arrow Icon */}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+            <path fillRule="evenodd" d="M10 3a.75.75 0 01.75.75v10.19l3.72-3.72a.75.75 0 111.06 1.06l-5 5a.75.75 0 01-1.06 0l-5-5a.75.75 0 111.06-1.06l3.72 3.72V3.75A.75.75 0 0110 3z" clipRule="evenodd" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 });
