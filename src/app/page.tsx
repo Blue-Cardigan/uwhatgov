@@ -2,13 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Resizable } from 're-resizable'; // Import Resizable
 import Image from 'next/image'; // Import Next Image
 
 // Import components
 import ChatList from '@/components/ChatList';
 import ChatView from '@/components/ChatView';
-import OriginalContribution from '@/components/OriginalContribution'; // Import new component
 import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the icon
 import { AuthForm } from '@/components/AuthForm'; // Import AuthForm
 import DebateInitializer from '@/components/DebateInitializer'; // Import the new component
