@@ -3,7 +3,11 @@
 import { useState, FormEvent } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-export function AuthForm() {
+interface AuthFormProps {
+  onSuccess?: () => void; // Optional callback on successful sign-in/sign-up
+}
+
+export function AuthForm({ onSuccess }: AuthFormProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,17 +34,21 @@ export function AuthForm() {
         });
         if (error) throw error;
         if (data.user?.identities?.length === 0) {
-            // This can happen if user already exists but isn't confirmed
-            setMessage('User already exists. Please check your email to confirm your account or try signing in.');
+          // This can happen if user already exists but isn't confirmed
+          setMessage('User already exists. Please check your email to confirm your account or try signing in.');
         } else if (data.session) {
-            setMessage('Sign up successful! You are now logged in.');
-            // Optionally redirect or update UI state
-            window.location.reload(); // Simple refresh to update auth state
+          // Sign up successful AND session created (user might be auto-logged in)
+          setMessage('Sign up successful! You are now logged in.');
+          // No longer reload, call onSuccess to close modal
+          onSuccess?.(); 
         } else {
-            setMessage('Sign up successful! Please check your email to confirm your account.');
+          // Sign up successful, but requires email confirmation
+          setMessage('Sign up successful! Please check your email to confirm your account.');
+          // Keep modal open for this message
         }
-        setEmail('');
-        setPassword('');
+        // Don't clear fields immediately if confirmation needed
+        // setEmail('');
+        // setPassword('');
       } else {
         // Sign In
         const { error } = await supabase.auth.signInWithPassword({
@@ -49,8 +57,8 @@ export function AuthForm() {
         });
         if (error) throw error;
         setMessage('Sign in successful!');
-        // Optionally redirect or update UI state
-        window.location.reload(); // Simple refresh to update auth state
+        // No longer reload, call onSuccess to close modal
+        onSuccess?.(); 
       }
     } catch (err: any) {
       console.error('Auth error:', err);

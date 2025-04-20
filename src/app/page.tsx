@@ -9,11 +9,15 @@ import ChatList from '@/components/ChatList';
 import ChatView from '@/components/ChatView';
 import OriginalContribution from '@/components/OriginalContribution'; // Import new component
 import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the icon
+import { AuthForm } from '@/components/AuthForm'; // Import AuthForm
 
 // Import types
 import { InternalDebateSummary, DebateMetadata } from '@/types';
 import { DebateResponse } from '@/lib/hansard/types'; // Import necessary types
 import { Speech } from '@/components/ChatView'; // Import Speech type
+
+// Import context hook
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 // Define type for the ChatView ref methods
 interface ChatViewHandle {
@@ -33,6 +37,8 @@ export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const chatViewRef = useRef<ChatViewHandle>(null); // Ref for ChatView scrolling and triggering
+  const { user, loading: authLoading, logout } = useAuth(); // Get auth state
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false); // State for Auth Modal
 
   // Caches stored in refs/state
   // Metadata cache uses state to trigger re-renders when items are added/updated for ChatList
@@ -483,18 +489,59 @@ export default function Home() {
 
   return (
     <main className="flex h-screen w-screen bg-[#111b21] text-white overflow-hidden relative">
-      {/* Sidebar - Hidden on mobile if a chat is selected */}
+      {/* Auth Modal Overlay - Conditionally Rendered */}
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="relative bg-white p-4 rounded-lg shadow-xl max-w-md w-full">
+            {/* Close Button for Modal */}
+            <button 
+              onClick={() => setIsAuthModalOpen(false)} 
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-800 p-1 rounded-full bg-gray-200 hover:bg-gray-300 text-lg font-bold"
+              aria-label="Close authentication form"
+            >
+              &times;
+            </button>
+            <AuthForm onSuccess={() => setIsAuthModalOpen(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* Main Application UI - Always Rendered Now */}
+      {/* Sidebar */}
       <div
         className={`
           ${selectedDebateId ? 'hidden md:flex' : 'flex'}
           w-full md:w-2/5 border-r border-gray-700 flex-col bg-[#111b21]
         `}
       >
+        {/* Updated Sidebar Header */}
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#202c33] min-h-[64px]"> {/* Added min-height */} 
+          {authLoading ? (
+            <span className="text-sm text-gray-400 italic">Loading...</span>
+          ) : user ? (
+            <>
+              <span className="text-sm text-gray-300 truncate" title={user.email}>{user.email}</span>
+              <button
+                onClick={logout}
+                className="text-sm text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded hover:bg-gray-600 transition-colors"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="w-full text-center text-sm bg-indigo-600 text-white py-1.5 px-3 rounded-md hover:bg-indigo-700 transition-colors"
+            >
+              Sign In / Sign Up
+            </button>
+          )}
+        </div>
         <ChatList
           onSelectDebate={handleSelectDebate}
           selectedDebateId={selectedDebateId}
-          allMetadata={metadataCache} // Pass down the metadata state object
-          onItemVisible={handleChatItemVisible} // Pass down the visibility callback
+          allMetadata={metadataCache}
+          onItemVisible={handleChatItemVisible}
         />
       </div>
 
@@ -650,7 +697,7 @@ export default function Home() {
                         className="absolute top-1 right-1 text-gray-500 hover:text-white p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-xs z-40"
                         title="Close summary"
                      >
-                        ✕
+                            ✕
                      </button>
                      {isLoadingSummary ? (
                          <span className="italic text-gray-400 animate-pulse">Generating summary...</span>
@@ -696,31 +743,31 @@ export default function Home() {
                       }}
                       className="absolute bottom-0 left-0 right-0 bg-[#111b21] border-t border-gray-700 z-20 overflow-hidden flex flex-col shadow-lg"
                       handleComponent={{ top: <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-10 h-2 bg-gray-600 hover:bg-gray-500 rounded cursor-ns-resize" /> }}
-                  >
-                  {/* Inner container for padding and scrolling */}
-                  <div className="p-4 overflow-y-auto flex-grow">
-                      {selectedOriginalItem ? (
-                          <>
-                              <h3 className="text-sm font-semibold text-blue-300 mb-2">Original Contribution (Index: {selectedOriginalIndex})</h3>
-                              <OriginalContribution item={selectedOriginalItem} />
-                          </>
-                      ) : isLoadingOriginal ? (
-                          <div className="text-center text-gray-400">Loading original text...</div>
-                      ) : errorOriginal ? (
-                           <div className="text-center text-red-400">Error loading original: {errorOriginal}</div>
-                      ) : (
-                           <div className="text-center text-gray-500">Original contribution not found or loading.</div>
-                      )}
-                  </div>
-                   {/* Close Button */}
-                   <button
-                       onClick={() => setSelectedOriginalIndex(null)} // Close panel
-                       className="absolute top-2 right-2 text-gray-400 hover:text-white p-1 rounded-full bg-gray-600 hover:bg-gray-500 text-xs z-30"
-                       title="Close original view"
-                   >
-                       ✕
-                   </button>
-                </Resizable>
+                    >
+                    {/* Inner container for padding and scrolling */}
+                    <div className="p-4 overflow-y-auto flex-grow">
+                        {selectedOriginalItem ? (
+                            <>
+                                <h3 className="text-sm font-semibold text-blue-300 mb-2">Original Contribution (Index: {selectedOriginalIndex})</h3>
+                                <OriginalContribution item={selectedOriginalItem} />
+                            </>
+                        ) : isLoadingOriginal ? (
+                            <div className="text-center text-gray-400">Loading original text...</div>
+                        ) : errorOriginal ? (
+                                 <div className="text-center text-red-400">Error loading original: {errorOriginal}</div>
+                            ) : (
+                                 <div className="text-center text-gray-500">Original contribution not found or loading.</div>
+                            )}
+                    </div>
+                     {/* Close Button */}
+                     <button
+                         onClick={() => setSelectedOriginalIndex(null)} // Close panel
+                         className="absolute top-2 right-2 text-gray-400 hover:text-white p-1 rounded-full bg-gray-600 hover:bg-gray-500 text-xs z-30"
+                         title="Close original view"
+                     >
+                         ✕
+                     </button>
+                   </Resizable>
             )}
 
             {/* Footer */}
@@ -731,14 +778,14 @@ export default function Home() {
 
           </>
         ) : (
-          // Placeholder when no debate is selected - This div will be hidden on mobile by parent logic
+          // Placeholder when no debate is selected
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
-            <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
-              <img src="/whatguv.svg" alt="UWhatGov Logo" className="w-100 h-100 text-gray-500 mx-auto opacity-50" />
-              <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
-              <p className="mt-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
-              <div className="mt-8 border-t border-gray-600 pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>
-            </div>
+             <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
+               <img src="/whatguv.svg" alt="UWhatGov Logo" className="w-100 h-100 text-gray-500 mx-auto opacity-50" />
+               <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
+               <p className="mt-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
+               <div className="mt-8 border-t border-gray-600 pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>
+             </div>
           </div>
         )}
       </div>
