@@ -431,7 +431,12 @@ export default function Home() {
           ${selectedDebateId ? 'flex' : 'hidden md:flex'}
           flex-grow flex-col bg-[#0b141a] overflow-hidden relative
         `}
-        style={{backgroundImage: "url('/whatsapp-bg.png')", backgroundSize: 'contain', backgroundPosition: 'center'}}
+        style={!selectedDebateId ? {
+          backgroundImage: "url('/edited-pattern.svg')",
+          backgroundSize: 'contain',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat' // Ensure it doesn't repeat by default
+        } : {}}
       >
         {selectedDebateId ? (
           <>
@@ -580,7 +585,10 @@ export default function Home() {
                 errorOriginal={errorOriginal}
                 fetchOriginalDebate={() => fetchOriginalDebate(selectedDebateId)} // Pass fetch function
                 selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
-                onBubbleClick={() => {}} // Pass handler down
+                onBubbleClick={(index) => {
+                  console.log(`[page.tsx] Bubble clicked, setting index: ${index}`);
+                  setSelectedOriginalIndex(index ?? null); // Set to null if index is undefined
+                }} // Pass handler down
                 searchQuery={currentSearchQuery} // Pass search query
                 highlightedIndex={highlightedIndex} // Pass highlighted item's index
                 onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Pattern Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>SVG Pattern Editor</h1>
+    <div class="editor-area">
+        <div id="svg-container">
+            <!-- SVG will be loaded here -->
+        </div>
+        <div id="controls">
+            <h2>Selected Element Controls</h2>
+            <div class="control-group">
+                <label for="rotate-slider">Rotate:</label>
+                <input type="range" id="rotate-slider" min="-180" max="180" value="0" step="1" disabled>
+                <span id="rotate-value">0</span>°
+            </div>
+            <div class="control-group">
+                <label for="scale-slider">Scale:</label>
+                <input type="range" id="scale-slider" min="0.1" max="3" value="1" step="0.05" disabled>
+                <span id="scale-value">1.0</span>x
+            </div>
+             <p class="no-selection">Select an icon to edit.</p>
+        </div>
+    </div>
+    <button id="download-btn">Download SVG</button>
+
+    <script src="script.js"></script>
+</body>
+</html> 

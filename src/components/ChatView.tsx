@@ -974,11 +974,11 @@ const ChatView = forwardRef(({
   };
 
   return (
-    <div className="flex flex-col h-full relative bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200">
+    <div className="flex flex-col h-full relative bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200 bg-[url('/edited-pattern.svg')] bg-repeat bg-[length:70px_70px]">
       {/* Scrollable chat content area */}
       <div ref={scrollContainerRef} className="flex-grow overflow-y-auto p-4 space-y-4">
         {renderContent()}
-        <div className="h-8 px-4 pb-4 flex items-center">
+        <div className="h-6 px-4 pb-4 flex items-center">
           {typingSpeakerInfo && (
             <TypingIndicator
               speakerName={typingSpeakerInfo.speaker}

@@ -1,0 +1,108 @@
+body {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    background-color: #f0f0f0;
+}
+
+/* New wrapper for editor area */
+.editor-area {
+    display: flex;
+    gap: 20px; /* Space between SVG and controls */
+    align-items: flex-start; /* Align tops */
+    margin-bottom: 20px;
+}
+
+#svg-container {
+    width: 200px; /* Match SVG width */
+    height: 200px; /* Match SVG height */
+    border: 1px solid #ccc;
+    overflow: hidden; /* Important for wrap-around effect */
+    position: relative;
+    background-color: #e0e0e0; /* Light grey background */
+    /* Removed margin-bottom as it's now on .editor-area */
+    flex-shrink: 0; /* Prevent container from shrinking */
+}
+
+#svg-container svg {
+    display: block; /* Remove extra space below SVG */
+    width: 100%;
+    height: 100%;
+}
+
+#svg-container g {
+    cursor: grab;
+}
+
+#svg-container g:active,
+#svg-container g.active-drag { /* Style for selected element */
+    cursor: grabbing;
+    outline: 1px dashed blue; /* Feedback for selection */
+}
+
+/* Controls styling */
+#controls {
+    border: 1px solid #ccc;
+    padding: 15px;
+    background-color: #f9f9f9;
+    min-width: 220px; /* Give controls some space */
+}
+
+#controls h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.1em;
+    text-align: center;
+}
+
+.control-group {
+    margin-bottom: 15px;
+    display: flex;
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    align-items: center;
+    gap: 5px;
+}
+
+.control-group label {
+    width: 50px; /* Align labels */
+    text-align: right;
+    font-size: 0.9em;
+}
+
+.control-group input[type="range"] {
+    flex-grow: 1; /* Take remaining space */
+    cursor: pointer;
+}
+.control-group input[type="range"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.control-group span {
+    font-weight: bold;
+    min-width: 35px; /* Prevent layout shifts */
+    text-align: right;
+}
+
+#controls .no-selection {
+    text-align: center;
+    font-style: italic;
+    color: #888;
+    margin-top: 20px;
+}
+
+#controls:not(.element-selected) .control-group {
+    display: none; /* Hide controls when nothing selected */
+}
+#controls.element-selected .no-selection {
+    display: none; /* Hide message when something selected */
+}
+
+
+#download-btn {
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+} 
