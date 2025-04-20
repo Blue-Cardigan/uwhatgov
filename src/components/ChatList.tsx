@@ -316,32 +316,35 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
               className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm"
               title={showFilters ? "Hide Filters" : "Show Filters"}
             >
-              Filters {showFilters ? '▲' : '▼'}
+              {showFilters ? (
+                <svg fill="#FFFFFF" width="16px" height="16px" viewBox="0 0 24 24" id="filter-filled" data-name="Flat Color" xmlns="http://www.w3.org/2000/svg" className="icon flat-color"><path id="primary" d="M18,2H6A2,2,0,0,0,4,4V6.64a2,2,0,0,0,.46,1.28L9,13.36V21a1,1,0,0,0,.47.85A1,1,0,0,0,10,22a1,1,0,0,0,.45-.11l4-2A1,1,0,0,0,15,19V13.36l4.54-5.44A2,2,0,0,0,20,6.64V4A2,2,0,0,0,18,2Z" style={{fill: 'currentColor'}}></path></svg>
+              ) : (
+                <svg fill="none" width="16px" height="16px" viewBox="0 0 24 24" id="filter-outline" data-name="Line Color" xmlns="http://www.w3.org/2000/svg" className="icon line-color"><path id="primary" d="M5,4V6.64a1,1,0,0,0,.23.64l4.54,5.44a1,1,0,0,1,.23.64V21l4-2V13.36a1,1,0,0,1,.23-.64l4.54-5.44A1,1,0,0,0,19,6.64V4a1,1,0,0,0-1-1H6A1,1,0,0,0,5,4Z" style={{stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: '2'}}></path></svg>
+              )}
             </button>
           </div>
 
           {/* Collapsible Filters Section */}
           {showFilters && (
-             <div className="flex flex-col sm:flex-row flex-wrap gap-2 items-center border-t border-gray-600 pt-2 mt-2">
+             <div className="flex flex-row flex-wrap gap-2 items-center border-t border-gray-600 pt-2 mt-2">
                  {/* House Filter */}
                  <select
                     value={houseFilter}
                     onChange={(e) => setHouseFilter(e.target.value)}
-                    className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer w-full sm:w-auto"
+                    className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer w-auto flex-shrink-0"
                  >
-                    <option value="">Any House</option>
+                    <option value="">House</option>
                     <option value="Commons">Commons</option>
                     <option value="Lords">Lords</option>
                  </select>
                  {/* Date Filters */}
-                 <div className="flex flex-col sm:flex-row gap-2 items-center text-sm text-gray-400 w-full sm:w-auto">
-                   <span className="hidden sm:inline">From:</span>
+                 <div className="flex flex-row gap-2 items-center text-sm text-gray-400 w-auto">
                    <input
                      type="date"
                      aria-label="Start date filter"
                      value={startDateFilter}
                      onChange={(e) => setStartDateFilter(e.target.value)}
-                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full sm:w-auto"
+                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 w-auto"
                      max={endDateFilter || getTodayDateString()} // Adjust max based on end date
                    />
                    <span className="hidden sm:inline">To:</span>
@@ -350,19 +353,29 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                      aria-label="End date filter"
                      value={endDateFilter}
                      onChange={(e) => setEndDateFilter(e.target.value)}
-                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full sm:w-auto"
+                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 w-auto"
                      min={startDateFilter}
                      max={getTodayDateString()}
                    />
                  </div>
-                 {/* Actions Row - Moved inside filters */}
-                 <div className="flex gap-2 items-center w-full sm:w-auto sm:ml-auto">
+                 {/* Actions Row - Now aligns better with flex-wrap */}
+                 <div className="flex gap-2 items-center w-auto sm:ml-auto flex-shrink-0">
                      <button
                         type="submit"
-                        className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md disabled:opacity-50 transition-colors flex-grow sm:flex-grow-0"
+                        className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md disabled:opacity-50 transition-colors flex items-center justify-center flex-shrink-0"
                         disabled={isLoading}
+                        title="Apply Filters"
                      >
-                       {isLoading ? 'Searching...' : 'Apply'}
+                       {isLoading ? (
+                         <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                         </svg>
+                       ) : (
+                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-5 h-5"> 
+                           <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                         </svg>
+                       )}
                      </button>
                       {/* Clear Filters Button */}
                       {(searchTerm || startDateFilter || endDateFilter || houseFilter) && (
@@ -376,10 +389,14 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                                 // Trigger handleSearch without event to reset view
                                 handleSearch();
                             }}
-                            className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm flex-grow sm:flex-grow-0"
+                            className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm flex items-center justify-center flex-shrink-0"
                             title="Clear search and filters"
                          >
-                            Clear
+                            <span className="hidden sm:inline">Clear</span>
+                            {/* X Icon for mobile */}
+                            <svg className="sm:hidden w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
                          </button>
                       )}
                  </div>

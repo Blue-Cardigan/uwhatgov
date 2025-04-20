@@ -734,7 +734,7 @@ export default function Home() {
           // Placeholder when no debate is selected - This div will be hidden on mobile by parent logic
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
             <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-20 h-20 text-gray-500 mx-auto opacity-50"><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75h-7.5"/></svg>
+              <img src="/whatguv.svg" alt="UWhatGov Logo" className="w-100 h-100 text-gray-500 mx-auto opacity-50" />
               <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
               <p className="mt-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
               <div className="mt-8 border-t border-gray-600 pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>
