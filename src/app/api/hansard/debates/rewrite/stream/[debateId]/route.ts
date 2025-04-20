@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getHansardDebate } from '@/lib/hansardService';
 import { generateDebateStream } from '@/lib/geminiService';
-import { GenerateContentStreamResult, EnhancedGenerateContentResponse } from '@google/generative-ai';
+import { GenerateContentStreamResult } from '@google/generative-ai';
 import { DebateContentItem } from '@/lib/hansard/types'; // Assuming types are here
 import { createClient } from '@supabase/supabase-js'; // Import Supabase client
 
@@ -209,7 +209,7 @@ export async function GET(
             }
 
             // Process any remaining data in the buffer when the stream ends
-            let finalPayload = buffer.trim();
+            const finalPayload = buffer.trim();
             if (finalPayload) {
                 console.warn(`[API Route /stream/${debateId}] Discarding non-empty buffer content during flush: "${finalPayload.substring(0, 200)}..."`);
                 // Do not attempt to send this potentially incomplete data
