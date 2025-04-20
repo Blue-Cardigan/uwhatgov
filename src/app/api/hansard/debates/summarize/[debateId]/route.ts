@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getHansardDebate } from '@/lib/hansardService';
 import { generateDebateSummary } from '@/lib/geminiService';
-import { supabase } from '@/lib/supabaseClient'; // Import supabase client
+import { createClient } from '@/lib/supabase/client'; // Corrected import
 import { DebateContentItem } from '@/lib/hansard/types';
 
-export const runtime = 'edge';
+// export const runtime = 'edge'; // Remove edge runtime
 export const dynamic = 'force-dynamic';
 export const maxDuration = 45; // Allow slightly longer for summary generation
+
+const supabase = createClient(); // Initialize client
 
 export async function GET(
     request: NextRequest,

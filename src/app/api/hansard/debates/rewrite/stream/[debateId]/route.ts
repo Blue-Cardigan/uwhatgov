@@ -5,7 +5,6 @@ import { GenerateContentStreamResult } from '@google/generative-ai';
 import { DebateContentItem } from '@/lib/hansard/types'; // Assuming types are here
 // Use the server client from @supabase/ssr
 import { createClient } from '@/lib/supabase/server';
-import type { Database } from '@/lib/database.types';
 
 // Define the expected structure for the event stream data
 interface StreamEvent {

@@ -241,7 +241,7 @@ const ChatView = forwardRef(({
         reactionChannelRef.current = null;
       }
     };
-  }, [debateId, currentUserId, authLoading, fetchAndAggregateReactions]); // Depend on context user ID and auth loading state
+  }, [debateId, currentUserId, authLoading, fetchAndAggregateReactions, supabase]); // Depend on context user ID and auth loading state
 
   // Effect to scroll to highlighted item (triggered from parent search navigation)
   useEffect(() => {
@@ -824,7 +824,7 @@ const ChatView = forwardRef(({
 
     buildMap();
 
-  }, [rewrittenDebate?.speeches, originalDebateData?.Items, getOrFetchParty]); // Removed speakerPartyMap from dependencies
+  }, [rewrittenDebate?.speeches, originalDebateData?.Items, getOrFetchParty, speakerPartyMap]); // Add speakerPartyMap back to dependencies
 
   // Effect to handle scrolling and update isNearBottom state
   useEffect(() => {

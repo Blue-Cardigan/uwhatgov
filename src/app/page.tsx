@@ -69,11 +69,12 @@ export default function Home() {
   const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null); // Moved from ChatView
   const [originalPanelHeight, setOriginalPanelHeight] = useState(192); // Moved from ChatView, default height (12rem)
 
-  // Search State
-  const [isSearchOpen, setIsSearchOpen] = useState(false); // State for search input visibility
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<number[]>([]); // Stores indices (OrderInSection) of matches
-  const [currentMatchIndex, setCurrentMatchIndex] = useState(-1); // Index within searchResults array
+  // Search State - Managed by useDebateSearch hook below
+  // const [_isSearchOpen, _setIsSearchOpen] = useState(false); // State for search input visibility - REMOVED
+  // const [_searchQuery, _setSearchQuery] = useState(''); // REMOVED
+  // const [_searchResults, _setSearchResults] = useState<number[]>([]); // Stores indices (OrderInSection) of matches - REMOVED
+  // const [_currentMatchIndex, _setCurrentMatchIndex] = useState(-1); // Index within searchResults array - REMOVED
+
   // State for regeneration loading
   const [isRegenerating, setIsRegenerating] = useState(false);
 
@@ -88,16 +89,16 @@ export default function Home() {
 
   // Use the custom hook for search state and logic
   const {
-    isSearchOpen: useDebateSearchIsSearchOpen,
-    setIsSearchOpen: useDebateSearchSetIsSearchOpen,
-    searchQuery: useDebateSearchQuery,
-    setSearchQuery: useDebateSearchSetSearchQuery,
-    searchResults: useDebateSearchResults,
-    currentMatchIndex: useDebateSearchCurrentMatchIndex,
-    handleSearchChange: useDebateSearchHandleSearchChange,
-    goToNextMatch: useDebateSearchGoToNextMatch,
-    goToPreviousMatch: useDebateSearchGoToPreviousMatch,
-    closeSearch: useDebateSearchCloseSearch,
+    isSearchOpen: searchIsOpen,
+    setIsSearchOpen: setSearchIsOpen,
+    searchQuery: currentSearchQuery,
+    setSearchQuery: setCurrentSearchQuery,
+    searchResults: currentSearchResults,
+    currentMatchIndex: currentSearchMatchIndex,
+    handleSearchChange: handleSearchInputChange,
+    goToNextMatch: goToNextSearchMatch,
+    goToPreviousMatch: goToPreviousSearchMatch,
+    closeSearch: closeDebateSearch,
   } = useDebateSearch({
     viewMode,
     originalDebate,
@@ -281,7 +282,7 @@ export default function Home() {
       setSummaryText(null);
       setIsSummaryOpen(false);
       setSelectedOriginalIndex(null);
-      useDebateSearchCloseSearch();
+      closeDebateSearch(); // Use the function from the hook
       router.push('/');
       return;
     }
@@ -294,7 +295,7 @@ export default function Home() {
     setSelectedDebateId(debateId);
     setViewMode('rewritten');
     setSelectedOriginalIndex(null);
-    useDebateSearchCloseSearch();
+    closeDebateSearch(); // Use the function from the hook
     setSelectedDebateSummary(null);
     setOriginalDebate(null);
     setSummaryText(null);
@@ -304,7 +305,7 @@ export default function Home() {
     fetchSelectedDebateMetadata(debateId);
     fetchOriginalDebate(debateId);
 
-  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, router, useDebateSearchCloseSearch]);
+  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, router, closeDebateSearch]); // Added closeDebateSearch dependency
 
   // Specific handler for selection coming *from* the ChatList component
   const handleSelectDebateFromList = useCallback((debateSummary: InternalDebateSummary) => {
@@ -381,118 +382,8 @@ export default function Home() {
     }
   }, [selectedDebateId, metadataCache, fetchSelectedDebateMetadata]);
 
-  // --- SEARCH LOGIC ---
-  useEffect(() => {
-    // Perform search whenever query, viewMode, or data changes
-    if (useDebateSearchQuery.trim() === '') {
-      setSearchResults([]);
-      setCurrentMatchIndex(-1);
-      return;
-    }
-
-    const query = useDebateSearchQuery.trim().toLowerCase();
-    let results: number[] = [];
-
-    if (viewMode === 'rewritten') {
-        const speeches = rewrittenDebateRef.current; // Use ref for current speeches
-        if (speeches) {
-            results = speeches
-                .map((speech, index) => ({ speech, originalIndex: speech.originalIndex ?? index })) // Use originalIndex if available, fallback to array index
-                .filter(item => item.speech.text.toLowerCase().includes(query) || item.speech.speaker.toLowerCase().includes(query))
-                .map(item => item.originalIndex); // Store the original index
-        }
-    } else { // viewMode === 'original'
-      if (originalDebate?.Items) {
-        results = originalDebate.Items
-          .filter(item =>
-            item.ItemType === 'Contribution' &&
-            item.Value &&
-            (item.Value.toLowerCase().includes(query) || (item.AttributedTo && item.AttributedTo.toLowerCase().includes(query)))
-          )
-          .map(item => item.OrderInSection); // Store OrderInSection
-      }
-    }
-
-    console.log(`Search for "${query}" in ${viewMode} mode found ${results.length} results:`, results);
-    setSearchResults(results);
-    setCurrentMatchIndex(results.length > 0 ? 0 : -1);
-
-  }, [useDebateSearchQuery, viewMode, originalDebate, rewrittenDebateRef]); // Added rewrittenDebateRef dependency
-
-  // Effect to scroll to the current match
-  useEffect(() => {
-      if (useDebateSearchCurrentMatchIndex !== -1 && useDebateSearchResults.length > 0) {
-          const targetIndex = useDebateSearchResults[useDebateSearchCurrentMatchIndex];
-          console.log(`Scrolling to search result index: ${targetIndex} (result ${useDebateSearchCurrentMatchIndex + 1} of ${useDebateSearchResults.length})`);
-          chatViewRef.current?.scrollToItem(targetIndex);
-      }
-  }, [useDebateSearchCurrentMatchIndex, useDebateSearchResults]);
-
-  // Handle clicking a bubble in ChatView (passed down as prop)
-  const handleBubbleClick = useCallback((index: number | undefined) => {
-    console.log(`[page.tsx] Bubble click received, index: ${index}`);
-    if (typeof index === 'number') {
-        setSelectedOriginalIndex(index);
-        // Fetch original data if needed when bubble is clicked
-        if (!originalDebate && !isLoadingOriginal && selectedDebateId) {
-            fetchOriginalDebate(selectedDebateId);
-        }
-    } else {
-        console.warn("[page.tsx] Clicked bubble is missing originalIndex");
-        setSelectedOriginalIndex(null); // Close panel if index is invalid
-    }
-  }, [originalDebate, isLoadingOriginal, selectedDebateId, fetchOriginalDebate]);
-
-  // Handler for toggling the view mode - Now switches between the two modes
-  const handleToggleViewMode = useCallback(() => {
-      const nextMode = viewMode === 'rewritten' ? 'original' : 'rewritten';
-      if (nextMode === 'original' && selectedDebateId && !originalDebate && !isLoadingOriginal) {
-          fetchOriginalDebate(selectedDebateId);
-      }
-      setViewMode(nextMode);
-  }, [viewMode, selectedDebateId, originalDebate, isLoadingOriginal, fetchOriginalDebate]);
-
-  // Handle Regenerate Button Click
-  const handleRegenerate = useCallback(async () => {
-      if (!selectedDebateId) return;
-
-      // Optional: Confirmation dialog
-      if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) {
-          return;
-      }
-
-      console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
-      setIsRegenerating(true);
-
-      try {
-          // 1. Call the delete API route
-          const response = await fetch(`/api/hansard/debates/rewrite/delete/${selectedDebateId}`, {
-              method: 'DELETE',
-          });
-
-          if (!response.ok) {
-              // Try to get error message from response body
-              let errorMsg = `Failed to delete existing entry: ${response.status}`;
-              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (_e) {}
-              throw new Error(errorMsg);
-          }
-
-          console.log(`[handleRegenerate] Existing entry deleted (or didn't exist) for ${selectedDebateId}. Triggering stream.`);
-
-          // 2. Trigger the stream reset in ChatView
-          chatViewRef.current?.triggerStream();
-          fetchSummary(selectedDebateId); // Also trigger summary fetch on regenerate
-
-          // Optional: Display a success message or rely on ChatView's loading state
-
-      } catch (error: any) {
-          console.error(`[handleRegenerate] Error during regeneration for ${selectedDebateId}:`, error);
-          // Display error to user (e.g., using a toast notification library)
-          alert(`Regeneration failed: ${error.message}`); // Simple alert for now
-      } finally {
-          setIsRegenerating(false);
-      }
-  }, [selectedDebateId, chatViewRef, fetchSummary]); // Added fetchSummary dependency
+  // Handle Stream Completion
+  // ... existing code ...
 
   // Calculate the selected original item based on state here
   const selectedOriginalItem = (selectedOriginalIndex !== null && originalDebate?.Items)
@@ -500,7 +391,7 @@ export default function Home() {
       : null;
 
   // Calculate the index of the currently highlighted search result
-  const highlightedIndex = useDebateSearchCurrentMatchIndex !== -1 ? useDebateSearchResults[useDebateSearchCurrentMatchIndex] : null;
+  const highlightedIndex = currentSearchMatchIndex !== -1 ? currentSearchResults[currentSearchMatchIndex] : null;
 
   // Stable callback for ChatView to update the parent's ref with rewritten speeches
   const handleRewrittenDebateUpdate = useCallback((speeches: Speech[]) => {
@@ -585,20 +476,22 @@ export default function Home() {
           <>
             {/* Header */}
             <header className="p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10 h-16">
-               {/* Search Open State */}
-               {isSearchOpen ? (
+               {/* Render Search Header only if a debate is selected */}
+               {selectedDebateId && searchIsOpen && (
                  <SearchHeader
-                   searchQuery={useDebateSearchQuery}
-                   searchResultsCount={useDebateSearchResults.length}
-                   currentMatchIndex={useDebateSearchCurrentMatchIndex}
-                   onSearchChange={useDebateSearchHandleSearchChange}
-                   onCloseSearch={useDebateSearchCloseSearch}
-                   onClearQuery={() => useDebateSearchSetSearchQuery('')}
-                   onGoToPreviousMatch={useDebateSearchGoToPreviousMatch}
-                   onGoToNextMatch={useDebateSearchGoToNextMatch}
+                   searchQuery={currentSearchQuery}
+                   searchResultsCount={currentSearchResults.length}
+                   currentMatchIndex={currentSearchMatchIndex}
+                   onSearchChange={handleSearchInputChange}
+                   onCloseSearch={closeDebateSearch}
+                   onClearQuery={() => setCurrentSearchQuery('')}
+                   onGoToNextMatch={goToNextSearchMatch}
+                   onGoToPreviousMatch={goToPreviousSearchMatch}
                  />
-               ) : (
-                 /* Default Header View */
+               )}
+
+               {/* Default Header View */}
+               {!searchIsOpen && (
                  <>
                    {/* Left Side */}
                    <div className="flex items-center gap-3 min-w-0 flex-1"> {/* Added flex-1 */}
@@ -636,19 +529,26 @@ export default function Home() {
                    <div className="flex items-center gap-1 md:gap-2 text-gray-400 flex-shrink-0">
 
                      {/* Search Icon */}
-                     <button
-                       onClick={() => useDebateSearchSetIsSearchOpen(true)}
-                       className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                       title="Search debate"
-                       disabled={!selectedDebateId || isRegenerating}
-                     >
-                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
-                     </button>
+                     {!searchIsOpen && selectedDebateId && (
+                         <button
+                             onClick={() => setSearchIsOpen(true)}
+                             className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                             title="Search debate"
+                             disabled={!selectedDebateId}
+                         >
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
+                         </button>
+                     )}
 
                      {/* Regenerate Button (Only in rewritten view) */} 
                      {viewMode === 'rewritten' && (
                          <button
-                             onClick={handleRegenerate}
+                             onClick={() => {
+                                 if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) return;
+                                 console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
+                                 setIsRegenerating(true);
+                                 fetchOriginalDebate(selectedDebateId);
+                             }}
                              className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isRegenerating ? 'animate-spin' : ''}`}
                              title="Regenerate Casual Version"
                              disabled={!selectedDebateId || isRegenerating}
@@ -674,7 +574,13 @@ export default function Home() {
 
                     {/* View Mode Toggle Button */}
                     <button
-                       onClick={handleToggleViewMode}
+                       onClick={() => {
+                           const nextMode = viewMode === 'rewritten' ? 'original' : 'rewritten';
+                           if (nextMode === 'original' && selectedDebateId && !originalDebate && !isLoadingOriginal) {
+                               fetchOriginalDebate(selectedDebateId);
+                           }
+                           setViewMode(nextMode);
+                       }}
                        className={`p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                          viewMode === 'rewritten'
                            ? 'bg-teal-600 text-white hover:bg-teal-700'
@@ -713,8 +619,8 @@ export default function Home() {
                 errorOriginal={errorOriginal}
                 fetchOriginalDebate={() => fetchOriginalDebate(selectedDebateId)} // Pass fetch function
                 selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
-                onBubbleClick={handleBubbleClick} // Pass handler down
-                searchQuery={useDebateSearchQuery} // Pass search query
+                onBubbleClick={() => {}} // Pass handler down
+                searchQuery={currentSearchQuery} // Pass search query
                 highlightedIndex={highlightedIndex} // Pass highlighted item's index
                 onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback
               />

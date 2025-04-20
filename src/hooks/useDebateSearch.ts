@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Speech } from '@/components/ChatView';
 import { DebateResponse } from '@/lib/hansard/types';
 

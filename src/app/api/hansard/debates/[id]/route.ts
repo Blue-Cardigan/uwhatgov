@@ -10,7 +10,6 @@ const HANSARD_API_BASE = 'https://hansard-api.parliament.uk';
 
 export async function GET(
   request: NextRequest,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   { params }: { params: any } // Destructure directly, use any for params type
 ) {
   const debateId = params.id as string; // Assert type here if needed

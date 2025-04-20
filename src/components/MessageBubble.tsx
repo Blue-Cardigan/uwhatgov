@@ -4,7 +4,6 @@ import { DebateResponse } from "@/lib/hansard/types";
 import { Speech, ReactionSummary } from "./ChatView";
 import { getPartyColorClass } from "@/lib/partyColors";
 import { ReactionBar } from './ReactionBar'; // Import ReactionBar
-import Link from "next/link";
 
 // MessageBubble component
 interface MessageBubbleProps {

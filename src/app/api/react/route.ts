@@ -2,7 +2,6 @@ import { createClient } from '@/lib/supabase/server'; // Use the shared server c
 // Removed import: import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import type { Database } from '@/lib/database.types';
 
 interface ReactRequestBody {
 	debate_id: string;
@@ -25,7 +24,7 @@ export const POST = async (request: NextRequest) => {
 	let requestBody: ReactRequestBody;
 	try {
 		requestBody = await request.json();
-	} catch (e) {
+	} catch (_e) {
 		return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
 	}
 

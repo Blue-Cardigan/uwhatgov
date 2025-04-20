@@ -283,23 +283,25 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
 
   // --- Metadata Fetching via Intersection Observer (Unchanged) ---
   useEffect(() => {
-      observerRef.current = new IntersectionObserver((entries) => {
+      const currentObservedItemsRef = observedItemsRef.current; // Capture current observed items map
+
+      const observer = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
               const id = (entry.target as HTMLElement).dataset.debateId;
               if (id) {
                   if (entry.isIntersecting) {
-                      observedItemsRef.current.set(id, entry);
+                      currentObservedItemsRef.set(id, entry);
                       if (!allMetadata[id]) {
                           fetchMetadata(id); // Prop function called here
                       }
                   } else {
-                      observedItemsRef.current.delete(id);
+                      currentObservedItemsRef.delete(id);
                   }
               }
           });
       }, { root: null, rootMargin: '0px', threshold: 0.1 });
 
-      const currentObserver = observerRef.current;
+      const currentObserver = observer;
       itemRefs.current.forEach((element) => {
           if (element) {
               currentObserver.observe(element);
@@ -307,9 +309,9 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
       });
 
       return () => {
+          // Use the captured values in the cleanup function
           currentObserver.disconnect();
-          observedItemsRef.current.clear();
-          // itemRefs.current.clear(); // Don't clear itemRefs here, setItemRef manages it
+          currentObservedItemsRef.clear();
       };
   }, [debates, fetchMetadata, allMetadata]);
 
