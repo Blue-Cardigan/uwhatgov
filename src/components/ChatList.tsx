@@ -439,17 +439,6 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
         {isLoading && debates.length > 0 && <p className="p-4 text-center text-gray-400">Loading more...</p>}
 
         {/* Load More Button - Only show if not searching/filtering */}
-        {!isLoading && !error && canLoadMore && debates.length > 0 && !isSearchActive && (
-          <div className="p-4 text-center">
-            <button
-              onClick={handleLoadPreviousDay}
-              disabled={isLoading}
-              className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md disabled:opacity-50 transition-colors"
-            >
-              Load Previous Day's Debates
-            </button>
-          </div>
-        )}
 
         {/* Sentinel Element for Intersection Observer - Only enable when not searching/filtering */}
         {!isLoading && canLoadMore && !isSearchActive && debates.length > 0 && (
