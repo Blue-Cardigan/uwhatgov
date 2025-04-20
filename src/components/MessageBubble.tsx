@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef } from "react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image"; // Import next/image
 import { DebateResponse } from "@/lib/hansard/types";
 import { Speech, ReactionSummary } from "./ChatView";
 import { getPartyColorClass } from "@/lib/partyColors";
 import { ReactionBar } from './ReactionBar'; // Import ReactionBar
+import { SignInPromptPopover } from './SignInPromptPopover'; // Import the new popover
 
 // MessageBubble component
 interface MessageBubbleProps {
@@ -76,6 +76,9 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
     const [errorInfo, setErrorInfo] = useState<string | null>(null);
     const fetchAbortControllerRef = useRef<AbortController | null>(null);
     const infoboxRef = useRef<HTMLDivElement>(null); // Ref for the infobox itself
+    // --- Popover State ---
+    const [isSignInPopoverVisible, setIsSignInPopoverVisible] = useState(false);
+    const bubbleRef = useRef<HTMLDivElement>(null); // Ref for the main bubble div to position popover
     // --- --- ---
 
     const baseClasses = "rounded-lg px-3 py-2 max-w-xs sm:max-w-sm md:max-w-md shadow-md cursor-pointer transition-colors duration-200 ease-in-out relative";
@@ -160,8 +163,42 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
         };
     }, [isInfoboxVisible]); // Re-run effect when isInfoboxVisible changes
 
+    // --- Bubble Click Handler ---
+    const handleBubbleClick = () => {
+        if (!userId) {
+            // Unauthenticated user: toggle sign-in popover
+            setIsSignInPopoverVisible(prev => !prev);
+        } else {
+            // Authenticated user: call original onClick (select message)
+            onClick();
+        }
+    };
+    // --- --- ---
+
+    // --- Simple Reaction Display (for unauthenticated users) ---
+    const SimpleReactionDisplay = () => {
+        if (!reactions || reactions.length === 0) return null;
+
+        const visibleReactions = reactions.filter(r => r.count > 0);
+        if (visibleReactions.length === 0) return null;
+
+        return (
+            <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
+                <div className="max-w-xs sm:max-w-sm md:max-w-md flex space-x-1 mt-1">
+                    {visibleReactions.map(({ emoji, count }) => (
+                        <div key={emoji} className="flex items-center px-1.5 py-0.5 rounded-full text-xs bg-gray-600/30 border border-gray-500 text-gray-300">
+                            <span className="mr-1">{emoji}</span>
+                            <span className="font-medium">{count}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+    // --- --- ---
+
     return (
-        // Wrapper div containing portrait, bubble, and reaction bar
+        // Wrapper div containing portrait, bubble, and reaction bar/display
         <div ref={itemRef} className={`flex flex-col mb-3 ${isOwnMessage ? 'items-end' : 'items-start'} rounded-lg transition-all duration-150 ease-in-out`}>
             {/* Row for Portrait + Bubble Content */}
             <div className={`flex gap-2 w-full ${alignment}`}>
@@ -206,8 +243,8 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                         {/* --- --- --- */}
                     </div>
                 )}
-                {/* Bubble Content - Main click target for selecting speech */}
-                <div className={`${baseClasses} ${colors} ${highlightRing}`} onClick={onClick}>
+                {/* Bubble Content - Main click target for selecting speech OR triggering popover */}
+                <div ref={bubbleRef} className={`${baseClasses} ${colors} ${highlightRing}`} onClick={handleBubbleClick}>
                     {/* Speaker Name - onClick here toggles infobox */}
                     <div
                         className="inline-block relative cursor-pointer"
@@ -224,23 +261,36 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                  {isOwnMessage && <div className="w-8 flex-shrink-0"></div>} 
             </div>
 
-            {/* --- Reaction Bar --- NEW */} 
-            {/* Positioned below the bubble, aligned with it */} 
-            {/* Conditionally render only if there are reactions or user is logged in */} 
-            {(reactions.length > 0 || userId) && speech.originalIndex !== undefined && debateId && (
-                <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
-                    {/* Adjust max-width to align roughly under the bubble */} 
-                    <div className="max-w-xs sm:max-w-sm md:max-w-md">
-                        <ReactionBar
-                            debateId={debateId}
-                            speechOriginalIndex={speech.originalIndex}
-                            reactions={reactions}
-                            userId={userId}
-                        />
+            {/* --- Conditional Reaction Display --- */}
+            {userId ? (
+                // Authenticated: Show interactive ReactionBar if selected or has reactions
+                (isSelected || reactions.length > 0) && speech.originalIndex !== undefined && debateId && (
+                    <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
+                        <div className="max-w-xs sm:max-w-sm md:max-w-md">
+                            <ReactionBar
+                                debateId={debateId}
+                                speechOriginalIndex={speech.originalIndex}
+                                reactions={reactions}
+                                userId={userId}
+                            />
+                        </div>
                     </div>
-                </div>
+                )
+            ) : (
+                 // Unauthenticated: Show simple display if reactions exist
+                 reactions.length > 0 && speech.originalIndex !== undefined && debateId && <SimpleReactionDisplay />
             )}
-            {/* --- --- --- */} 
+            {/* --- --- --- */}
+
+            {/* --- Sign In Popover (for unauthenticated users) --- */}
+            {!userId && (
+                <SignInPromptPopover
+                    isVisible={isSignInPopoverVisible}
+                    onClose={() => setIsSignInPopoverVisible(false)}
+                    targetRef={bubbleRef} // Position relative to the bubble
+                />
+            )}
+            {/* --- --- --- */}
         </div>
     );
 };
