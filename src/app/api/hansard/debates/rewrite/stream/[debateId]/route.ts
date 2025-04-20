@@ -30,7 +30,7 @@ interface Speech {
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { debateId: string } }
+    context: any // Use 'any' as in the metadata route
 ) {
     // Create the server client inside the handler
     const supabase = createClient();
@@ -39,6 +39,7 @@ export async function GET(
     const { data: { user } } = await supabase.auth.getUser();
 
     // Access params *after* await
+    const { params } = context; // Destructure params from context
     const debateId = params.debateId;
 
     if (!user) {
