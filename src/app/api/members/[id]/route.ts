@@ -9,9 +9,11 @@ const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const memberId = parseInt(params.id, 10);
+  // Await params before accessing id
+  const resolvedParams = await params;
+  const memberId = parseInt(resolvedParams.id, 10);
 
   if (isNaN(memberId)) {
     return NextResponse.json({ error: 'Invalid member ID' }, { status: 400 });

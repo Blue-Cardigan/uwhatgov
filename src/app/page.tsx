@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
 import { Resizable } from 're-resizable'; // Import Resizable
+import Image from 'next/image'; // Import Next Image
 
 // Import components
 import ChatList from '@/components/ChatList';
@@ -10,6 +11,7 @@ import ChatView from '@/components/ChatView';
 import OriginalContribution from '@/components/OriginalContribution'; // Import new component
 import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the icon
 import { AuthForm } from '@/components/AuthForm'; // Import AuthForm
+import DebateInitializer from '@/components/DebateInitializer'; // Import the new component
 
 // Import types
 import { InternalDebateSummary, DebateMetadata } from '@/types';
@@ -35,7 +37,6 @@ const ORIGINAL_DEBATE_CACHE_PREFIX = 'uwhatgov_original_';
 
 export default function Home() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const chatViewRef = useRef<ChatViewHandle>(null); // Ref for ChatView scrolling and triggering
   const { user, loading: authLoading, logout } = useAuth(); // Get auth state
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false); // State for Auth Modal
@@ -248,81 +249,116 @@ export default function Home() {
       }
   }, []); 
 
-  // Callback for ChatList items becoming visible
-  const handleChatItemVisible = useCallback((debateId: string) => {
-      // console.log(`[handleChatItemVisible] Item visible: ${debateId}`);
-      fetchSelectedDebateMetadata(debateId); // Trigger fetch/cache check
-  }, [fetchSelectedDebateMetadata]);
-
-  // Effect to sync selectedDebateId from URL, reset state, and fetch data
-  useEffect(() => {
-    const debateIdFromUrl = searchParams.get('debateId');
-
-    if (debateIdFromUrl) {
-        // Check if the ID from URL is different from the current state
-        if (debateIdFromUrl !== selectedDebateId) {
-             console.log(`[useEffect] Detected ID change: ${selectedDebateId} -> ${debateIdFromUrl}`);
-             // Check caches *before* setting state
-             let cachedMetadata: DebateMetadata | null = null;
-             if (metadataCache[debateIdFromUrl]) {
-                 cachedMetadata = metadataCache[debateIdFromUrl];
-             } else {
-                 try {
-                     const storedData = localStorage.getItem(METADATA_CACHE_PREFIX + debateIdFromUrl);
-                     if (storedData) cachedMetadata = JSON.parse(storedData);
-                 } catch (e) { console.error("Error reading initial metadata from LS", e); }
-             }
-
-             const cachedOriginal = originalDebateCache.current.get(debateIdFromUrl);
-             setSelectedDebateId(debateIdFromUrl);
- 
-             // Reset ALL other relevant states immediately
-             setSelectedDebateSummary(null); // Will be updated by ChatList or fetched if needed
-             setOriginalDebate(cachedOriginal || null); // Use cached data if available, otherwise null
-             setIsLoadingOriginal(!cachedOriginal); // Set loading only if not cached
-             setErrorOriginal(null);
-             setSelectedOriginalIndex(null);
-             setSelectedDebateMetadata(cachedMetadata || null);
-             setIsLoadingMetadata(!cachedMetadata && !metadataCache[debateIdFromUrl]?.isLoading); // Set loading if not cached AND not already loading in state
-             setErrorMetadata(null);
-             setViewMode('rewritten');
-             setSearchQuery('');
-             setIsSearchOpen(false);
-             setSummaryText(null); // Clear summary
-             setIsLoadingSummary(false);
-             setErrorSummary(null);
-        }
-        // Always fetch data if a valid ID is present in the URL
-        // Fetch functions have internal checks to prevent redundant calls if data exists
-        console.log(`[useEffect] Ensuring data for ID: ${debateIdFromUrl} (will use cache if available)`);
-        fetchOriginalDebate(debateIdFromUrl);
-        fetchSelectedDebateMetadata(debateIdFromUrl);
-        fetchSummary(debateIdFromUrl); // Fetch summary when ID changes
-
-    } else {
-        // No debateId in URL, ensure everything is cleared
-        if (selectedDebateId !== null) {
-            console.log('[useEffect] Clearing selected debate state.');
-            setSelectedDebateId(null);
-            setSelectedDebateSummary(null);
-            setOriginalDebate(null);
-            setIsLoadingOriginal(false);
-            setErrorOriginal(null);
-            setSelectedOriginalIndex(null);
-            setSelectedDebateMetadata(null);
-            setIsLoadingMetadata(false);
-            setErrorMetadata(null);
-            setViewMode('rewritten');
-            setSearchQuery('');
-            setIsSearchOpen(false);
-            setSummaryText(null); // Clear summary
-            setIsLoadingSummary(false);
-            setErrorSummary(null);
-        }
+  // Handle Debate Selection (triggered by ChatList or DebateInitializer)
+  const handleDebateSelect = useCallback((debateId: string | null) => {
+    console.log(`[handleDebateSelect] Selecting debate: ${debateId}`);
+    if (!debateId) {
+      setSelectedDebateId(null);
+      setSelectedDebateSummary(null);
+      setOriginalDebate(null);
+      setSelectedDebateMetadata(null);
+      setSummaryText(null);
+      setIsSummaryOpen(false);
+      router.push('/');
+      return;
     }
-    // Dependencies: Run when URL changes or the selected ID state changes.
-    // fetchOriginalDebate and fetchSelectedDebateMetadata are stable due to useCallback.
-  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, fetchSummary, metadataCache]); // Added metadataCache
+
+    if (debateId === selectedDebateId) {
+      console.log("[handleDebateSelect] Debate already selected, skipping.");
+      return;
+    }
+
+    setSelectedDebateId(debateId);
+    setViewMode('rewritten');
+    setSelectedOriginalIndex(null);
+    setSearchQuery('');
+    setIsSearchOpen(false);
+    setSearchResults([]);
+    setCurrentMatchIndex(-1);
+    setSelectedDebateSummary(null);
+    setOriginalDebate(null);
+    setSummaryText(null);
+    setIsSummaryOpen(false);
+
+    router.push(`/?debateId=${debateId}`);
+    fetchSelectedDebateMetadata(debateId);
+    fetchOriginalDebate(debateId);
+
+  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, router]);
+
+  // Specific handler for selection coming *from* the ChatList component
+  const handleSelectDebateFromList = useCallback((debateSummary: InternalDebateSummary) => {
+    handleDebateSelect(debateSummary.id);
+  }, [handleDebateSelect]);
+
+  // Handle Deleting a Debate (from ChatList)
+  const handleDeleteDebate = useCallback(async (debateId: string) => {
+    if (!debateId) return;
+    console.log(`[handleDeleteDebate] Attempting to delete debate: ${debateId}`);
+
+    // Optimistic UI update: Remove from metadata cache immediately
+    setMetadataCache(prev => {
+        const { [debateId]: _, ...rest } = prev;
+        return rest;
+    });
+    // If the deleted debate was selected, clear the view
+    if (selectedDebateId === debateId) {
+        handleDebateSelect(null);
+    }
+
+    try {
+        const response = await fetch(`/api/hansard/debates/rewrite/delete/${debateId}`, {
+            method: 'DELETE',
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `Failed to delete debate: ${response.status}`);
+        }
+        console.log(`[handleDeleteDebate] Successfully deleted debate ${debateId} from backend.`);
+        // Remove from localStorage (original and metadata)
+        localStorage.removeItem(ORIGINAL_DEBATE_CACHE_PREFIX + debateId);
+        localStorage.removeItem(METADATA_CACHE_PREFIX + debateId);
+        // Note: If using a more robust cache/state management, update there too.
+
+    } catch (error: any) {
+        console.error(`[handleDeleteDebate] Failed to delete debate ${debateId}:`, error);
+        // Revert optimistic update on error?
+        // For simplicity, we currently don't revert the UI but log the error.
+        // You might want to show a notification to the user.
+        // Re-fetch metadata to potentially restore if deletion failed?
+        fetchSelectedDebateMetadata(debateId);
+    }
+  }, [selectedDebateId, handleDebateSelect, fetchSelectedDebateMetadata]); // Added dependencies
+
+  // Effect to update selectedDebateMetadata state when the cache changes for the selected ID
+  useEffect(() => {
+    if (selectedDebateId && metadataCache[selectedDebateId]) {
+      const cachedMeta = metadataCache[selectedDebateId];
+      // Check if it has actual data (e.g., speakerCount) and isn't just loading/error
+      if (!cachedMeta.isLoading && !cachedMeta.error && typeof cachedMeta.speakerCount === 'number') {
+          setSelectedDebateMetadata(cachedMeta);
+          setIsLoadingMetadata(false);
+          setErrorMetadata(null);
+      } else {
+          setIsLoadingMetadata(!!cachedMeta.isLoading);
+          setErrorMetadata(cachedMeta.error || null);
+          if (cachedMeta.isLoading || cachedMeta.error) {
+              setSelectedDebateMetadata(null);
+          }
+      }
+    } else if (selectedDebateId) {
+        setIsLoadingMetadata(true);
+        setErrorMetadata(null);
+        setSelectedDebateMetadata(null);
+        if (!metadataCache[selectedDebateId]?.isLoading) {
+            fetchSelectedDebateMetadata(selectedDebateId);
+        }
+    } else {
+        setIsLoadingMetadata(false);
+        setErrorMetadata(null);
+        setSelectedDebateMetadata(null);
+    }
+  }, [selectedDebateId, metadataCache, fetchSelectedDebateMetadata]);
 
   // --- SEARCH LOGIC ---
   useEffect(() => {
@@ -396,15 +432,6 @@ export default function Home() {
   }, [selectedDebateId, viewMode]);
 
   // --- END SEARCH LOGIC ---
-
-  // Handle selecting a debate from the list - ONLY updates URL
-  const handleSelectDebate = useCallback((debate: InternalDebateSummary) => {
-    console.log(`[handleSelectDebate] Routing to debate: ${debate.id}`);
-    // We only need to update the URL. The useEffect above will handle state changes.
-    // Optionally update summary immediately for faster title update, but useEffect handles resets.
-    // setSelectedDebateSummary(debate); // Keep or remove based on desired UX for title update speed
-    router.push(`/?debateId=${debate.id}`, { scroll: false });
-  }, [router]);
 
   // Handle clicking a bubble in ChatView (passed down as prop)
   const handleBubbleClick = useCallback((index: number | undefined) => {
@@ -537,12 +564,19 @@ export default function Home() {
             </button>
           )}
         </div>
-        <ChatList
-          onSelectDebate={handleSelectDebate}
-          selectedDebateId={selectedDebateId}
-          allMetadata={metadataCache}
-          onItemVisible={handleChatItemVisible}
-        />
+        <div className="flex-grow overflow-y-auto">
+          {/* Wrap DebateInitializer in Suspense */}
+          <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading debate list...</div>}>
+              <DebateInitializer onDebateSelect={handleDebateSelect} />
+          </Suspense>
+          <ChatList
+            selectedDebateId={selectedDebateId}
+            onSelectDebate={handleSelectDebateFromList}
+            onDeleteDebate={handleDeleteDebate}
+            allMetadata={metadataCache}
+            fetchMetadata={fetchSelectedDebateMetadata}
+          />
+        </div>
       </div>
 
       {/* Main Chat View Area - Hidden on mobile if NO chat is selected */}
@@ -781,7 +815,13 @@ export default function Home() {
           // Placeholder when no debate is selected
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
              <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
-               <img src="/whatguv.svg" alt="UWhatGov Logo" className="w-100 h-100 text-gray-500 mx-auto opacity-50" />
+               <Image 
+                 src="/whatguv.svg" 
+                 alt="UWhatGov Logo" 
+                 width={100}
+                 height={100}
+                 className="text-gray-500 mx-auto opacity-50"
+               />
                <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
                <p className="mt-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
                <div className="mt-8 border-t border-gray-600 pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>

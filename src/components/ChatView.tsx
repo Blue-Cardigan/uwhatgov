@@ -204,7 +204,7 @@ const ChatView = forwardRef(({
           processPendingSpeeches(); // Check again
       }
   // Removed persistToSupabase dependency
-  }, [onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS, isStreaming]);
+  }, [onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS]);
 
   const processJsonBuffer = useCallback((isComplete = false) => {
       const buffer = jsonBufferRef.current;

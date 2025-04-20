@@ -89,11 +89,17 @@ function calculateSpeakerMetadata(items: DebateContentItem[]): { speakerCount: n
     return { speakerCount, partyRatios };
 }
 
+// Define the expected context type
+// interface RouteContext { // Keep interface defined for clarity, but don't use it directly in signature
+//     params: { id: string };
+// }
+
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } } // Use id instead of debateId
+    context: any // Remove type annotation again
 ) {
-    const debateId = params.id; // Use params.id
+    const { params } = context; // Destructure params inside the function body
+    const debateId = params.id;
 
     if (!debateId) {
         return NextResponse.json({ error: 'Missing debate ID parameter' }, { status: 400 });

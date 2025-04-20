@@ -41,9 +41,10 @@ interface Speech {
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { debateId: string } }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { params }: { params: any } // Destructure directly, use any for params type
 ) {
-    const { debateId } = params;
+    const debateId = params.debateId as string; // Use debateId from params, assert type
 
     if (!debateId) {
         return NextResponse.json({ error: 'Missing debateId parameter' }, { status: 400 });

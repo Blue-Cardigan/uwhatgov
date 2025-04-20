@@ -7,14 +7,22 @@ import { SearchResult, DebateSummary } from '@/lib/hansard/types';
 import DebateMetadataIcon from './DebateMetadataIcon'; // Import the new icon component
 import { getTodayDateString, formatDate, getPreviousDay } from '@/utils/dateUtils'; // Import date utils
 
+// Icon for delete button
+const DeleteIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+    <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.58.22-2.325.418C2.675 4.818 2 5.684 2 6.699v6.602c0 1.015.675 1.88 1.675 2.088 1.56.32 3.302.533 5.05.616a2.751 2.751 0 0 0 2.55-.001c1.747-.083 3.49-.296 5.05-.616C17.325 15.182 18 14.316 18 13.301V6.699c0-1.015-.675-1.88-1.675-2.088-.745-.198-1.53-.341-2.325-.418v-.443A2.75 2.75 0 0 0 11.25 1h-2.5ZM7.5 3.75c0-.69.56-1.25 1.25-1.25h2.5c.69 0 1.25.56 1.25 1.25v.443c-.754.08-1.512.194-2.25.34V4a.75.75 0 0 0-1.5 0v.533c-.738-.146-1.496-.26-2.25-.34V3.75Zm-1.49 4.265a.75.75 0 0 0-1.04 1.08l2.268 2.158-2.27 2.158a.75.75 0 1 0 1.04 1.08l2.268-2.158 2.27 2.158a.75.75 0 1 0 1.04-1.08L9.82 11.253l2.27-2.158a.75.75 0 0 0-1.04-1.08l-2.268 2.158-2.27-2.158Z" clipRule="evenodd" />
+  </svg>
+);
+
 interface ChatListProps {
   onSelectDebate: (debateSummary: InternalDebateSummary) => void;
   selectedDebateId: string | null;
-  allMetadata: Record<string, DebateMetadata>; // Added prop for centralized cache
-  onItemVisible: (id: string) => void; // Added callback for item visibility
+  allMetadata: Record<string, DebateMetadata>;
+  fetchMetadata: (id: string) => void; // Renamed from onItemVisible for clarity
+  onDeleteDebate: (id: string) => void; // Add the new prop
 }
 
-export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata, onItemVisible }: ChatListProps) {
+export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata, fetchMetadata, onDeleteDebate }: ChatListProps) {
   const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -244,56 +252,62 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
     // Also depends on handleLoadPreviousDay potentially changing if its deps change
   }, [isLoading, canLoadMore, handleLoadPreviousDay, isSearchActive]); // Use isSearchActive instead of searchTerm
 
-  // Use a single observer for all items - NOW CALLS onItemVisible prop
+  // Use a single observer for all items - NOW CALLS fetchMetadata prop
   useEffect(() => {
       observerRef.current = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
-              const debateId = (entry.target as HTMLElement).dataset.debateId;
-              if (debateId) {
+              const id = (entry.target as HTMLElement).dataset.debateId;
+              if (id) {
                   if (entry.isIntersecting) {
-                      observedItemsRef.current.set(debateId, entry);
-                      // Call parent function when item becomes visible
-                      onItemVisible(debateId);
+                      observedItemsRef.current.set(id, entry);
+                      // console.log(`Item intersecting: ${id}`);
+                      // Trigger metadata fetch when item becomes visible
+                      if (!allMetadata[id]) {
+                          // console.log(`[Observer] Triggering metadata fetch for: ${id}`);
+                          fetchMetadata(id);
+                      }
                   } else {
-                      observedItemsRef.current.delete(debateId);
+                      observedItemsRef.current.delete(id);
+                      // console.log(`Item NOT intersecting: ${id}`);
                   }
               }
           });
-      }, { rootMargin: '200px 0px', threshold: 0.01 }); // Fetch slightly before fully visible
-
-      const currentObserver = observerRef.current;
-      const currentItems = itemRefs.current; // Capture the ref value
-
-      // Re-observe items when debates change
-      currentItems.forEach(el => {
-          if (el) currentObserver.observe(el);
+      }, {
+          root: null, // Use the viewport as the root
+          rootMargin: '0px', // No margin
+          threshold: 0.1 // Trigger when 10% of the item is visible
       });
 
-      return () => {
-          currentItems.forEach(el => {
-              if (el) currentObserver.unobserve(el);
-          });
-          currentObserver.disconnect();
-          observerRef.current = null;
-      };
-  }, [debates, onItemVisible]); // Re-run if debates or onItemVisible changes
+      const currentObserver = observerRef.current;
 
-  // Function to set ref for each item
+      // Re-observe items when debates change
+      itemRefs.current.forEach((element) => {
+          if (element) {
+              currentObserver.observe(element);
+          }
+      });
+
+      // Cleanup function
+      return () => {
+          currentObserver.disconnect();
+          observedItemsRef.current.clear();
+          itemRefs.current.clear();
+      };
+  }, [debates, fetchMetadata, allMetadata]); // Re-run if debates list or fetchMetadata changes
+
   const setItemRef = (debateId: string, element: HTMLDivElement | null) => {
-      if (element) {
-          itemRefs.current.set(debateId, element);
-          // Observe new elements as they are added
-          if (observerRef.current) {
-              observerRef.current.observe(element);
-          }
-      } else {
-          // Clean up ref and observer if element is removed
-          if (observerRef.current) {
-              const existingEl = itemRefs.current.get(debateId);
-              if (existingEl) observerRef.current.unobserve(existingEl);
-          }
-          itemRefs.current.delete(debateId);
+    if (element) {
+      itemRefs.current.set(debateId, element);
+      if (observerRef.current) {
+        observerRef.current.observe(element);
       }
+    } else {
+      const oldElement = itemRefs.current.get(debateId);
+      if (oldElement && observerRef.current) {
+        observerRef.current.unobserve(oldElement);
+      }
+      itemRefs.current.delete(debateId);
+    }
   };
 
   return (
@@ -423,7 +437,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                 data-debate-id={debate.id}
                 key={debate.id}
                 onClick={() => onSelectDebate(debate)}
-                className={`p-3 cursor-pointer transition-colors duration-150 flex items-center gap-3 ${isSelected ? 'bg-teal-800' : 'hover:bg-[#2a3942]'}`}
+                className={`p-3 cursor-pointer transition-colors duration-150 flex items-center gap-3 relative group ${isSelected ? 'bg-teal-800' : 'hover:bg-[#2a3942]'}`}
               >
                 {/* Pass metadata from prop to the icon */}
                 <DebateMetadataIcon metadata={metadata} />
@@ -449,6 +463,18 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 italic truncate">...{debate.match}...</p>
                   )}
                 </div>
+                {/* Delete Button - Show on hover/focus, positioned top-right */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevent triggering the main onClick
+                    onDeleteDebate(debate.id);
+                  }}
+                  className="absolute top-1 right-1 p-1 rounded-full bg-red-600 bg-opacity-70 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity duration-150 hover:bg-opacity-100 focus:outline-none focus:ring-2 focus:ring-red-400"
+                  aria-label={`Delete debate ${debate.title}`}
+                  title={`Delete debate ${debate.title}`}
+                >
+                  <DeleteIcon />
+                </button>
               </div>
           );
         })}

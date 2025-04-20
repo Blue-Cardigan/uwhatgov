@@ -10,9 +10,9 @@ export const maxDuration = 45; // Allow slightly longer for summary generation
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { debateId: string } }
+    { params }: { params: Promise<{ debateId: string }> } // Updated type for Next.js 15
 ) {
-    const { debateId } = params;
+    const { debateId } = await params; // Await params before accessing debateId
 
     if (!debateId) {
         return NextResponse.json({ error: 'Missing debateId parameter' }, { status: 400 });

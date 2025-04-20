@@ -3,11 +3,17 @@ import { NextRequest, NextResponse } from 'next/server';
 // Base URL for the Hansard API
 const HANSARD_API_BASE = 'https://hansard-api.parliament.uk';
 
+// Define the expected context type (keep for reference)
+// interface RouteContext {
+//   params: { id: string };
+// }
+
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  { params }: { params: any } // Destructure directly, use any for params type
 ) {
-  const debateId = params.id; // Get the ID from the dynamic route segment
+  const debateId = params.id as string; // Assert type here if needed
 
   if (!debateId) {
       return NextResponse.json({ error: 'Debate ID is required' }, { status: 400 });
