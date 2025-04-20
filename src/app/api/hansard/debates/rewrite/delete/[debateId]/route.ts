@@ -13,13 +13,6 @@ if (!supabaseUrl || !supabaseServiceKey) {
     // but the check inside the handler is more crucial for runtime.
 }
 
-// Initialize Supabase client with Service Role Key
-// Note: This uses the Service Role key, granting admin privileges.
-// Use cautiously and ensure this API route is properly secured if necessary.
-const supabaseAdmin = supabaseUrl && supabaseServiceKey
-    ? createClient(supabaseUrl, supabaseServiceKey)
-    : null;
-
 export const runtime = 'edge'; // Edge runtime is preferred for lower latency
 export const dynamic = 'force-dynamic';
 

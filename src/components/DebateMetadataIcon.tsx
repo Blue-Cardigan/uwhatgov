@@ -9,7 +9,6 @@ interface DebateMetadataIconProps {
 
 const DebateMetadataIcon: React.FC<DebateMetadataIconProps> = ({ metadata, size = 40 }) => {
   const radius = size / 2;
-  const circumference = 2 * Math.PI * radius;
 
   // Simple spinner for loading state
   if (metadata?.isLoading) {
@@ -32,7 +31,7 @@ const DebateMetadataIcon: React.FC<DebateMetadataIconProps> = ({ metadata, size 
 
   const { partyRatios, speakerCount } = metadata;
   const ratios = Object.entries(partyRatios)
-    .filter(([party, ratio]) => ratio > 0) // Filter out zero ratios
+    .filter(([, ratio]) => ratio > 0) // Filter out zero ratios
     .sort(([, ratioA], [, ratioB]) => ratioB - ratioA); // Optional: Sort by ratio desc
 
   let cumulativeAngle = -90; // Start at 12 o'clock

@@ -6,6 +6,8 @@ import { MessageBubble, HighlightedText } from './MessageBubble';
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types';
 import { parsePartyAbbreviation } from '@/lib/partyColors';
 import { TypingIndicator } from './TypingIndicator';
+import { escapeRegExp } from '@/utils/stringUtils';
+import { getBaseSpeakerName } from '@/utils/chatUtils';
 
 // Define types locally for the rewritten version
 export interface Speech {
@@ -18,11 +20,6 @@ interface RewrittenDebate {
   id: string;
   title: string;
   speeches: Speech[];
-}
-
-// Helper function to escape regex characters
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // Initialize Supabase client
@@ -52,54 +49,12 @@ interface ChatViewProps {
   onRewrittenDebateUpdate: (speeches: Speech[]) => void; // Callback for parent
 }
 
-// Helper function to extract base speaker name (removing party/constituency/title)
-function getBaseSpeakerName(speakerString: string): string {
-    if (!speakerString) return 'Unknown Speaker';
-
-    let name = speakerString.trim();
-    const knownParties = ['Con', 'DUP', 'Lab', 'LD', 'PC', 'UUP', 'Ind', 'SNP', 'CB']; // Keep in sync
-
-    const lastParenMatch = name.match(/\s*\(([^)]+)\)$/);
-
-    if (lastParenMatch) {
-        const lastContent = lastParenMatch[1].trim();
-        const potentialParty = lastContent.split('/')[0].trim();
-        const nameBeforeLastParen = name.substring(0, lastParenMatch.index).trim();
-        const secondLastParenMatch = nameBeforeLastParen.match(/\s*\(([^)]+)\)$/);
-
-        // Case 1: Last paren content IS a known party
-        if (knownParties.includes(potentialParty)) {
-            name = nameBeforeLastParen;
-            // If there was another paren before it (constituency), remove that too
-            if (secondLastParenMatch) {
-                name = name.substring(0, secondLastParenMatch.index).trim();
-            }
-        } 
-        // Case 2: Last paren content is NOT a party, but there IS a paren before it
-        else if (secondLastParenMatch) {
-            // Assume format Name (Constituency) (SomethingElse - maybe role in brackets?)
-            // Base name is before the constituency
-            name = nameBeforeLastParen.substring(0, secondLastParenMatch.index).trim();
-        } 
-        // Case 3: Last paren content is NOT a party, and NO paren before it
-        else {
-            // Assume format Title (Actual Name). Extract name from parens.
-            name = lastContent;
-        }
-    } 
-    // Case 4: No parentheses at all
-    // name remains the original trimmed string
-
-    return name || 'Unknown Speaker'; // Return the processed name or fallback
-}
-
 const ChatView = forwardRef(({
     debateId,
     viewMode,
     originalDebateData,
     isLoadingOriginal,
     errorOriginal,
-    fetchOriginalDebate,
     selectedOriginalIndex,
     onBubbleClick,
     searchQuery, // Destructure new prop
@@ -211,11 +166,6 @@ const ChatView = forwardRef(({
         return;
     }
     console.log(`Persisting ${currentSpeeches.length} speeches for ${currentDebateId}...`);
-    const dataToPersist: RewrittenDebate = {
-        id: currentDebateId,
-        title: rewrittenDebate?.title || 'Untitled Debate',
-        speeches: currentSpeeches,
-    };
 
     const { error: updateStatusError } = await supabase
         .from('casual_debates_uwhatgov')
@@ -226,14 +176,31 @@ const ChatView = forwardRef(({
         console.error('Failed to update status to processing:', updateStatusError);
     }
 
+    console.log(`[Supabase] Getting latest rewrite for ${currentDebateId}...`);
+    const existing = await supabase.from('casual_debates_uwhatgov').select('*').eq('id', currentDebateId).maybeSingle();
+    // Compare timestamps if existing record found
+    if (existing.data) {
+         console.log(`[Supabase] Existing entry found for ${currentDebateId}, checking timestamp...`);
+         const existingTimestamp = new Date(existing.data.updated_at).getTime();
+         const currentTimestamp = new Date().getTime();
+         // If the existing entry is recent enough (e.g., within the last hour), don't overwrite?
+         // This is a basic example, adjust threshold as needed
+         if (currentTimestamp - existingTimestamp < 3600 * 1000) { // 1 hour
+              console.log(`[Supabase] Existing entry for ${currentDebateId} is recent. Skipping persistence.`);
+              return; // Skip upsert if recent
+         }
+    }
+
+    console.log(`[Supabase] Persisting rewrite for ${currentDebateId}...`);
     const { error: upsertError } = await supabase
         .from('casual_debates_uwhatgov')
         .upsert({
             id: currentDebateId,
-            content: JSON.stringify(dataToPersist),
-            status: 'success',
-            last_updated_at: new Date().toISOString(),
-        });
+            title: rewrittenDebate?.title ?? 'Unknown Title', // Use ref for title
+            speeches: speechesRef.current, // Use ref for speeches
+            status: 'completed', // Mark as completed
+            updated_at: new Date().toISOString(), // Update timestamp
+        }, { onConflict: 'id' });
 
     if (upsertError) {
         console.error(`Supabase upsert error ${currentDebateId}:`, upsertError);
@@ -241,7 +208,136 @@ const ChatView = forwardRef(({
     } else {
         console.log(`Persisted ${currentDebateId} successfully.`);
     }
-  }, [supabase]);
+  }, [rewrittenDebate?.title]);
+
+  // Function to process the queue of pending speeches with delay
+  const processPendingSpeeches = useCallback(async () => {
+      if (isProcessingQueueRef.current || pendingSpeechesQueueRef.current.length === 0) {
+          // If already processing or queue is empty, check for completion
+          if (!isProcessingQueueRef.current && pendingSpeechesQueueRef.current.length === 0 && !isStreaming && !persistAttemptedRef.current && debateIdRef.current && speechesRef.current.length > 0) {
+              // If not processing, queue empty, streaming done, not persisted yet, and we have a debateId and speeches
+              console.log(`[Queue ${debateIdRef.current}] Queue empty & stream complete. Persisting.`);
+              persistAttemptedRef.current = true;
+              await persistToSupabase(); // Ensure persistence happens after all speeches are shown
+          }
+          return;
+      }
+
+      isProcessingQueueRef.current = true;
+      const speechToShow = pendingSpeechesQueueRef.current.shift();
+
+      if (speechToShow) {
+          const baseSpeakerName = getBaseSpeakerName(speechToShow.speaker);
+          const partyAbbreviation = speakerPartyMap.get(baseSpeakerName) ?? null;
+          setTypingSpeakerInfo({ speaker: baseSpeakerName, party: partyAbbreviation });
+
+          // Clear previous timeout if exists
+          if (speechDisplayTimeoutRef.current) {
+              clearTimeout(speechDisplayTimeoutRef.current);
+          }
+
+          speechDisplayTimeoutRef.current = setTimeout(() => {
+              setTypingSpeakerInfo(null); // Hide typing indicator
+
+              // Add the speech to the actual displayed state
+              speechesRef.current = [...speechesRef.current, speechToShow];
+              setRewrittenDebate(prev => {
+                  const currentDebateId = debateIdRef.current;
+                  if (!currentDebateId) return prev;
+                  const base = prev ?? { id: currentDebateId, title: 'Loading...', speeches: [] };
+                  return {
+                      ...base,
+                      speeches: speechesRef.current
+                  };
+              });
+              onRewrittenDebateUpdate(speechesRef.current); // Notify parent
+
+              isProcessingQueueRef.current = false;
+              speechDisplayTimeoutRef.current = null;
+              processPendingSpeeches(); // Process next item in queue
+          }, SPEECH_DISPLAY_DELAY_MS);
+      } else {
+          isProcessingQueueRef.current = false; // Should not happen if length check passed, but good practice
+          setTypingSpeakerInfo(null);
+          processPendingSpeeches(); // Check again (e.g., for persistence)
+      }
+  }, [persistToSupabase, onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS, isStreaming]);
+
+  const processJsonBuffer = useCallback((isComplete = false) => {
+      const buffer = jsonBufferRef.current;
+      if (!buffer) return;
+      const parsedSpeeches: Speech[] = [];
+      let processedChars = 0;
+      let tempBuffer = buffer;
+      let startOffset = 0;
+      let trimmed = tempBuffer.trim();
+      if (trimmed.startsWith('[')) trimmed = trimmed.substring(1);
+      trimmed = trimmed.trimStart();
+      if (trimmed.startsWith(',')) trimmed = trimmed.substring(1);
+      trimmed = trimmed.trimStart();
+      startOffset = tempBuffer.length - trimmed.length;
+      tempBuffer = trimmed;
+      let openBrackets = 0;
+      let objectStartIndex = -1;
+      for (let i = 0; i < tempBuffer.length; i++) {
+          const char = tempBuffer[i];
+          if (char === '{') {
+              if (openBrackets === 0) objectStartIndex = i;
+              openBrackets++;
+          } else if (char === '}') {
+              if (openBrackets > 0) {
+                  openBrackets--;
+                  if (openBrackets === 0 && objectStartIndex !== -1) {
+                      const objectString = tempBuffer.substring(objectStartIndex, i + 1);
+                      try {
+                          const parsedObject = JSON.parse(objectString);
+                          if (parsedObject && typeof parsedObject.speaker === 'string' && typeof parsedObject.text === 'string') {
+                              const newSpeech: Speech = {
+                                  speaker: parsedObject.speaker,
+                                  text: parsedObject.text,
+                                  originalIndex: typeof parsedObject.originalIndex === 'number' ? parsedObject.originalIndex : undefined,
+                                  originalSnippet: typeof parsedObject.originalSnippet === 'string' ? parsedObject.originalSnippet : undefined,
+                              };
+                              parsedSpeeches.push(newSpeech);
+                              processedChars = startOffset + i + 1;
+                              objectStartIndex = -1;
+                              let lookAheadIndex = i + 1;
+                              while (lookAheadIndex < tempBuffer.length && /\s/.test(tempBuffer[lookAheadIndex])) {
+                                  lookAheadIndex++;
+                              }
+                              if (tempBuffer[lookAheadIndex] === ',') {
+                                  processedChars = startOffset + lookAheadIndex + 1;
+                              }
+                          } else {
+                              console.warn(`[Buffer ${debateIdRef.current}] Invalid object:`, parsedObject);
+                              objectStartIndex = -1;
+                          }
+                      } catch (e: any) {
+                           console.warn(`[Buffer ${debateIdRef.current}] Partial parse fail. ${e.message}`);
+                           objectStartIndex = -1;
+                           openBrackets = 0;
+                           break;
+                      }
+                  }
+              }
+          }
+      }
+      if (processedChars > 0) {
+           jsonBufferRef.current = jsonBufferRef.current.substring(processedChars);
+      }
+       const remainingTrimmed = jsonBufferRef.current.trim();
+       if (isComplete && remainingTrimmed && remainingTrimmed !== ']') {
+           console.error(`[Buffer ${debateIdRef.current}] Unexpected remaining:`, jsonBufferRef.current);
+       }
+      if (parsedSpeeches.length > 0) {
+          // Add parsed speeches to the pending queue instead of directly updating state
+          pendingSpeechesQueueRef.current.push(...parsedSpeeches);
+          // Start processing the queue if not already running
+          if (!isProcessingQueueRef.current) {
+              processPendingSpeeches();
+          }
+      }
+  }, [processPendingSpeeches]);
 
   const connectEventSource = useCallback((attempt: number) => {
     if (!debateId) return;
@@ -314,136 +410,7 @@ const ChatView = forwardRef(({
            console.log(`[SSE ${debateId}] Unhandled type:`, streamEvent.type);
       }
     };
-  }, [debateId, MAX_RETRIES, INITIAL_RETRY_DELAY_MS, persistToSupabase]);
-
-  const processJsonBuffer = (isComplete = false) => {
-      let buffer = jsonBufferRef.current;
-      if (!buffer) return;
-      const parsedSpeeches: Speech[] = [];
-      let processedChars = 0;
-      let tempBuffer = buffer;
-      let startOffset = 0;
-      let trimmed = tempBuffer.trim();
-      if (trimmed.startsWith('[')) trimmed = trimmed.substring(1);
-      trimmed = trimmed.trimStart();
-      if (trimmed.startsWith(',')) trimmed = trimmed.substring(1);
-      trimmed = trimmed.trimStart();
-      startOffset = tempBuffer.length - trimmed.length;
-      tempBuffer = trimmed;
-      let openBrackets = 0;
-      let objectStartIndex = -1;
-      for (let i = 0; i < tempBuffer.length; i++) {
-          const char = tempBuffer[i];
-          if (char === '{') {
-              if (openBrackets === 0) objectStartIndex = i;
-              openBrackets++;
-          } else if (char === '}') {
-              if (openBrackets > 0) {
-                  openBrackets--;
-                  if (openBrackets === 0 && objectStartIndex !== -1) {
-                      const objectString = tempBuffer.substring(objectStartIndex, i + 1);
-                      try {
-                          const parsedObject = JSON.parse(objectString);
-                          if (parsedObject && typeof parsedObject.speaker === 'string' && typeof parsedObject.text === 'string') {
-                              const newSpeech: Speech = {
-                                  speaker: parsedObject.speaker,
-                                  text: parsedObject.text,
-                                  originalIndex: typeof parsedObject.originalIndex === 'number' ? parsedObject.originalIndex : undefined,
-                                  originalSnippet: typeof parsedObject.originalSnippet === 'string' ? parsedObject.originalSnippet : undefined,
-                              };
-                              parsedSpeeches.push(newSpeech);
-                              processedChars = startOffset + i + 1;
-                              objectStartIndex = -1;
-                              let lookAheadIndex = i + 1;
-                              while (lookAheadIndex < tempBuffer.length && /\s/.test(tempBuffer[lookAheadIndex])) {
-                                  lookAheadIndex++;
-                              }
-                              if (tempBuffer[lookAheadIndex] === ',') {
-                                  processedChars = startOffset + lookAheadIndex + 1;
-                              }
-                          } else {
-                              console.warn(`[Buffer ${debateId}] Invalid object:`, parsedObject);
-                              objectStartIndex = -1;
-                          }
-                      } catch (e) {
-                           console.warn(`[Buffer ${debateId}] Partial parse fail.`);
-                           objectStartIndex = -1;
-                           openBrackets = 0;
-                           break;
-                      }
-                  }
-              }
-          }
-      }
-      if (processedChars > 0) {
-           jsonBufferRef.current = jsonBufferRef.current.substring(processedChars);
-      }
-       const remainingTrimmed = jsonBufferRef.current.trim();
-       if (isComplete && remainingTrimmed && remainingTrimmed !== ']') {
-           console.error(`[Buffer ${debateId}] Unexpected remaining:`, jsonBufferRef.current);
-       }
-      if (parsedSpeeches.length > 0) {
-          // Add parsed speeches to the pending queue instead of directly updating state
-          pendingSpeechesQueueRef.current.push(...parsedSpeeches);
-          // Start processing the queue if not already running
-          if (!isProcessingQueueRef.current) {
-              processPendingSpeeches();
-          }
-      }
-  };
-
-  // Function to process the queue of pending speeches with delay
-  const processPendingSpeeches = useCallback(async () => {
-      if (isProcessingQueueRef.current || pendingSpeechesQueueRef.current.length === 0) {
-          // If already processing or queue is empty, check for completion
-          if (!isProcessingQueueRef.current && pendingSpeechesQueueRef.current.length === 0 && !isStreaming && !persistAttemptedRef.current && debateIdRef.current && speechesRef.current.length > 0) {
-              // If not processing, queue empty, streaming done, not persisted yet, and we have a debateId and speeches
-              console.log(`[Queue ${debateIdRef.current}] Queue empty & stream complete. Persisting.`);
-              persistAttemptedRef.current = true;
-              await persistToSupabase(); // Ensure persistence happens after all speeches are shown
-          }
-          return;
-      }
-
-      isProcessingQueueRef.current = true;
-      const speechToShow = pendingSpeechesQueueRef.current.shift();
-
-      if (speechToShow) {
-          const baseSpeakerName = getBaseSpeakerName(speechToShow.speaker);
-          const partyAbbreviation = speakerPartyMap.get(baseSpeakerName) ?? null;
-          setTypingSpeakerInfo({ speaker: baseSpeakerName, party: partyAbbreviation });
-
-          // Clear previous timeout if exists
-          if (speechDisplayTimeoutRef.current) {
-              clearTimeout(speechDisplayTimeoutRef.current);
-          }
-
-          speechDisplayTimeoutRef.current = setTimeout(() => {
-              setTypingSpeakerInfo(null); // Hide typing indicator
-
-              // Add the speech to the actual displayed state
-              speechesRef.current = [...speechesRef.current, speechToShow];
-              setRewrittenDebate(prev => {
-                  const currentDebateId = debateIdRef.current;
-                  if (!currentDebateId) return prev;
-                  const base = prev ?? { id: currentDebateId, title: 'Loading...', speeches: [] };
-                  return {
-                      ...base,
-                      speeches: speechesRef.current
-                  };
-              });
-              onRewrittenDebateUpdate(speechesRef.current); // Notify parent
-
-              isProcessingQueueRef.current = false;
-              speechDisplayTimeoutRef.current = null;
-              processPendingSpeeches(); // Process next item in queue
-          }, SPEECH_DISPLAY_DELAY_MS);
-      } else {
-          isProcessingQueueRef.current = false; // Should not happen if length check passed, but good practice
-          setTypingSpeakerInfo(null);
-          processPendingSpeeches(); // Check again (e.g., for persistence)
-      }
-  }, [persistToSupabase, onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS, isStreaming]);
+  }, [debateId, MAX_RETRIES, INITIAL_RETRY_DELAY_MS, processJsonBuffer]);
 
   useEffect(() => {
     if (!debateId) {
@@ -475,7 +442,7 @@ const ChatView = forwardRef(({
       setIsLoadingRewritten(true);
       setRewrittenDebate(null);
       speechesRef.current = [];
-      let currentDebateData: RewrittenDebate = { id: debateId, title: '', speeches: [] };
+      const currentDebateData: RewrittenDebate = { id: debateId, title: '', speeches: [] };
 
       try {
         console.log(`Checking Supabase for ${debateId}...`);
@@ -535,7 +502,7 @@ const ChatView = forwardRef(({
       eventSourceRef.current?.close();
       console.log(`SSE closed for ${debateId} on cleanup`);
     };
-  }, [debateId, connectEventSource, supabase]);
+  }, [debateId, connectEventSource, onRewrittenDebateUpdate]);
 
   const handleBubbleClickInternal = useCallback((index: number | undefined) => {
       console.log(`[ChatView] Bubble click index: ${index}. Calling parent.`);
@@ -562,8 +529,8 @@ const ChatView = forwardRef(({
               // console.log(`[Party Cache] HIT localStorage for member ${memberId}: ${cachedParty}`);
               return cachedParty === 'null' ? null : cachedParty; // Handle explicitly stored null
           }
-      } catch (e) {
-          console.error(`[Party Cache] Error reading localStorage for member ${memberId}:`, e);
+      } catch (_e) {
+          console.error(`[Party Cache] Error reading localStorage for member ${memberId}:`, _e);
       }
 
       // 2. Check if already fetching
@@ -586,8 +553,8 @@ const ChatView = forwardRef(({
               // 4. Store in localStorage
               try {
                   localStorage.setItem(cacheKey, fetchedParty === null ? 'null' : fetchedParty);
-              } catch (e) {
-                  console.error(`[Party Cache] Error writing localStorage for member ${memberId}:`, e);
+              } catch (_e) {
+                  console.error(`[Party Cache] Error writing localStorage for member ${memberId}:`, _e);
               }
 
               // 5. Update state map immediately (will trigger re-render)
@@ -609,12 +576,12 @@ const ChatView = forwardRef(({
           } else {
               console.warn(`[Party Cache] API fetch failed for member ${memberId}: ${response.status}. Caching null.`);
               // Cache null on failure to prevent repeated fetches for non-existent/erroring IDs
-              try { localStorage.setItem(cacheKey, 'null'); } catch (e) { /* ignore */ }
+              try { localStorage.setItem(cacheKey, 'null'); } catch (_e) { /* ignore */ }
           }
       } catch (error) {
           console.error(`[Party Cache] Network error fetching party for member ${memberId}:`, error);
           // Cache null on network error
-          try { localStorage.setItem(cacheKey, 'null'); } catch (e) { /* ignore */ }
+          try { localStorage.setItem(cacheKey, 'null'); } catch (_e) { /* ignore */ }
       } finally {
           currentlyFetchingParties.current.delete(memberId);
       }

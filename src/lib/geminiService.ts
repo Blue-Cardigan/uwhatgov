@@ -2,7 +2,6 @@ import {
     GoogleGenerativeAI,
     HarmCategory,
     HarmBlockThreshold,
-    GenerateContentResponse, // Import response type
     GenerateContentStreamResult, // Import stream result type
     SchemaType, // Import the SchemaType enum
     // Import specific schema types

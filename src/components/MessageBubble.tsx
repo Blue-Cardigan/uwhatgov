@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useState } from "react";
+import Image from "next/image"; // Import next/image
 import { DebateResponse } from "@/lib/hansard/types";
 import { Speech } from "./ChatView";
 import { getPartyColorClass } from "@/lib/partyColors";
@@ -96,7 +97,7 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
             });
             if (!response.ok) {
                 let errorMsg = `Failed: ${response.status}`;
-                try { const errData = await response.json(); errorMsg = errData.error || errorMsg; } catch (e) {}
+                try { const errData = await response.json(); errorMsg = errData.error || errorMsg; } catch (_e: any) {}
                 throw new Error(errorMsg);
             }
             const data: MemberInfo = await response.json();
@@ -163,13 +164,15 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                     onClick={handleInfoboxToggle}
                  >
                     {portraitUrl ? (
-                        <img
+                        <Image
                             src={portraitUrl}
                             alt={speech.speaker || 'Speaker'}
+                            width={32} // Add required width prop
+                            height={32} // Add required height prop
                             className="rounded-full w-full h-full object-cover bg-gray-600 pointer-events-none" // Disable pointer events on img itself
                         />
                     ) : (
-                        <div className="rounded-full w-full h-full bg-gray-500 flex items-center justify-center text-white text-xs font-semibold pointer-events-none"> {/* Disable pointer events */} 
+                        <div className="rounded-full w-full h-full bg-gray-500 flex items-center justify-center text-white text-xs font-semibold pointer-events-none"> {/* Disable pointer events */}
                             {speech.speaker?.charAt(0) || '?'}
                         </div>
                     )}
@@ -178,7 +181,7 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                         <div
                             ref={infoboxRef} // Add ref to the infobox itself
                             className="absolute bottom-full left-0 transform translate-y-35 mb-2 w-64 z-50 p-3 bg-[#2a3942] border border-gray-600 rounded-lg shadow-lg text-sm text-gray-200 whitespace-normal" // Increased z-index
-                            onClick={(e) => e.stopPropagation()} // Prevent clicks inside infobox from closing it
+                            onClick={(_e) => _e.stopPropagation()} // Prevent clicks inside infobox from closing it - prefix unused 'e'
                         >
                              {isLoadingInfo && <p className="text-center text-gray-400 italic">Loading...</p>}
                              {errorInfo && <p className="text-center text-red-400">Error: {errorInfo}</p>}

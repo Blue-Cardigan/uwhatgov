@@ -127,7 +127,7 @@ export default function Home() {
         const response = await fetch(hansardApiUrl);
         if (!response.ok) {
           let errorMsg = `Original fetch failed: ${response.status}`;
-          try { const errorData = await response.json(); errorMsg = errorData.error || errorData.message || errorMsg; } catch (e) {}
+          try { const errorData = await response.json(); errorMsg = errorData.error || errorData.message || errorMsg; } catch (_e) {}
           throw new Error(errorMsg);
         }
         const data: DebateResponse = await response.json();
@@ -198,7 +198,7 @@ export default function Home() {
           const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
           if (!response.ok) {
               let errorMsg = `Metadata fetch failed: ${response.status}`;
-              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) { }
+              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (_e) { }
               throw new Error(errorMsg);
           }
           const metadata: DebateMetadata = await response.json();
@@ -328,31 +328,6 @@ export default function Home() {
     // fetchOriginalDebate and fetchSelectedDebateMetadata are stable due to useCallback.
   }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, fetchSummary, metadataCache]);
 
-  // Fetch Original Debate Data
-  const fetchOriginalDebateData = useCallback(async (debateId: string | null) => {
-    if (!debateId || originalDebate || isLoadingOriginal) return;
-
-    console.log(`[page.tsx] Fetching ORIGINAL debate ${debateId}`);
-    setIsLoadingOriginal(true);
-    setErrorOriginal(null);
-    try {
-      const hansardApiUrl = `/api/hansard/debates/${debateId}`;
-      const response = await fetch(hansardApiUrl);
-      if (!response.ok) {
-        let errorMsg = `Original fetch failed: ${response.status}`;
-        try { const errorData = await response.json(); errorMsg = errorData.error || errorData.message || errorMsg; } catch (e) {}
-        throw new Error(errorMsg);
-      }
-      const data: DebateResponse = await response.json();
-      setOriginalDebate(data);
-    } catch (e: any) {
-      console.error(`[page.tsx] Failed fetch original ${debateId}:`, e);
-      setErrorOriginal(`Failed load original: ${e.message}`);
-    } finally {
-      setIsLoadingOriginal(false);
-    }
-  }, [originalDebate, isLoadingOriginal]);
-
   // --- SEARCH LOGIC ---
   useEffect(() => {
     // Perform search whenever query, viewMode, or data changes
@@ -481,7 +456,7 @@ export default function Home() {
           if (!response.ok) {
               // Try to get error message from response body
               let errorMsg = `Failed to delete existing entry: ${response.status}`;
-              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {}
+              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (_e) {}
               throw new Error(errorMsg);
           }
 

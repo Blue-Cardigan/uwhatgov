@@ -202,7 +202,7 @@ export async function GET(
                              // Remove the processed object from the buffer
                              buffer = buffer.substring(endIndex + 1);
                              lastIndex = 0; // Reset search from the beginning of the modified buffer
-                         } catch (parseError) {
+                         } catch (_parseError) {
                              // It wasn't valid JSON, maybe braces were mismatched or inside strings.
                              // Advance lastIndex to search past the start brace we found.
                              console.warn(`[API Route /stream/${debateId}] Partial match is not valid JSON yet: ${potentialJson.substring(0,100)}...`);
@@ -253,7 +253,7 @@ export async function GET(
                     // Try parsing the remaining buffer as is
                     JSON.parse(finalPayload);
                     // If it parses, send it directly
-                 } catch (parseError: any) {
+                 } catch (_parseError: any) {
                       // Parsing failed - potentially incomplete JSON
                       console.warn(`[API Route /stream/${debateId}] Remaining buffer is not valid JSON: "${finalPayload.substring(0,100)}...". Attempting completion.`);
                       // Attempt to complete it if it looks like an unclosed object

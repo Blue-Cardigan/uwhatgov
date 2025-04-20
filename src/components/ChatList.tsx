@@ -5,6 +5,7 @@ import { InternalDebateSummary, DebateMetadata } from '@/types';
 // Import Hansard API types
 import { SearchResult, DebateSummary } from '@/lib/hansard/types';
 import DebateMetadataIcon from './DebateMetadataIcon'; // Import the new icon component
+import { getTodayDateString, formatDate, getPreviousDay } from '@/utils/dateUtils'; // Import date utils
 
 interface ChatListProps {
   onSelectDebate: (debateSummary: InternalDebateSummary) => void;
@@ -12,9 +13,6 @@ interface ChatListProps {
   allMetadata: Record<string, DebateMetadata>; // Added prop for centralized cache
   onItemVisible: (id: string) => void; // Added callback for item visibility
 }
-
-// Helper to get today's date in YYYY-MM-DD format
-const getTodayDateString = () => new Date().toISOString().split('T')[0];
 
 export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata, onItemVisible }: ChatListProps) {
   const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
@@ -34,15 +32,6 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
   const [houseFilter, setHouseFilter] = useState(''); // 'Commons', 'Lords', or '' for both
   const [isSearchActive, setIsSearchActive] = useState(false); // Track if search/filters are active
   const [showFilters, setShowFilters] = useState(false); // State to control filter dropdown visibility
-
-  // Helper to format date string
-  const formatDate = (isoDateString: string) => {
-      try {
-          return isoDateString.split('T')[0]; // Extract YYYY-MM-DD
-      } catch {
-          return isoDateString; // Fallback
-      }
-  };
 
   const fetchLastSittingDate = async () => {
     try {
@@ -219,17 +208,11 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
   }, [searchTerm, startDateFilter, endDateFilter, houseFilter, fetchDebates, lastSittingDate]); // Add filters and fetchDebates dependency
 
   // --- Pagination --- Get previous day in YYYY-MM-DD format
-  const getPreviousDay = (dateString: string): string => {
-    const date = new Date(dateString);
-    date.setDate(date.getDate() - 1);
-    return date.toISOString().split('T')[0];
-  };
-
-  const handleLoadPreviousDay = () => {
+  const handleLoadPreviousDay = useCallback(() => {
     if (!oldestDateLoaded || isLoading) return;
     const previousDay = getPreviousDay(oldestDateLoaded);
     fetchDebates(previousDay);
-  };
+  }, [oldestDateLoaded, isLoading, fetchDebates]); // Added dependencies
 
   // --- Infinite Scroll Logic ---
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -279,14 +262,15 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
       }, { rootMargin: '200px 0px', threshold: 0.01 }); // Fetch slightly before fully visible
 
       const currentObserver = observerRef.current;
+      const currentItems = itemRefs.current; // Capture the ref value
 
       // Re-observe items when debates change
-      itemRefs.current.forEach(el => {
+      currentItems.forEach(el => {
           if (el) currentObserver.observe(el);
       });
 
       return () => {
-          itemRefs.current.forEach(el => {
+          currentItems.forEach(el => {
               if (el) currentObserver.unobserve(el);
           });
           currentObserver.disconnect();
