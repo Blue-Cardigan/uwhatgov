@@ -60,3 +60,40 @@ FOR SELECT USING (true);
 -- Example (ALLOW INSERT from service_role - typically used in backend):
 -- CREATE POLICY "Allow server-side insert" ON casual_debates_uwhatgov FOR INSERT WITH CHECK (auth.role() = 'service_role');
 -- CREATE POLICY "Allow server-side update" ON casual_debates_uwhatgov FOR UPDATE USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+
+
+-- Table to store emoji reactions on debates
+CREATE TABLE reactions_uwhatgov (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    debate_id UUID NOT NULL REFERENCES casual_debates_uwhatgov(id) ON DELETE CASCADE,
+    speech_original_index INTEGER NOT NULL, -- Added: Index of the speech within the debate content
+    emoji TEXT NOT NULL CHECK (char_length(emoji) > 0), -- Ensure emoji is not empty
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    -- Prevent duplicate reactions from the same user on the same speech with the same emoji
+    UNIQUE (user_id, debate_id, speech_original_index, emoji)
+);
+
+-- Indexes for efficient querying
+-- Composite index might be better depending on query patterns
+CREATE INDEX idx_reactions_debate_id_speech_index ON reactions_uwhatgov(debate_id, speech_original_index);
+CREATE INDEX idx_reactions_user_id ON reactions_uwhatgov(user_id);
+
+-- Enable Row Level Security
+ALTER TABLE reactions_uwhatgov ENABLE ROW LEVEL SECURITY;
+
+-- Policies for reactions
+CREATE POLICY "Allow users to read all reactions"
+ON reactions_uwhatgov
+FOR SELECT USING (true);
+
+CREATE POLICY "Allow users to insert their own reactions"
+ON reactions_uwhatgov
+FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Allow users to delete their own reactions"
+ON reactions_uwhatgov
+FOR DELETE USING (auth.uid() = user_id);
+
+-- Optional: Grant usage on sequence if needed for specific roles (usually handled by Supabase)
+-- GRANT USAGE, SELECT ON SEQUENCE reactions_uwhatgov_id_seq TO authenticated;

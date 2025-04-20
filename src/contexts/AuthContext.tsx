@@ -1,10 +1,12 @@
 'use client';
 
 import { createContext, useState, useEffect, useContext, ReactNode } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabaseClient';
+import { Session, User, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
+import type { Database } from '@/lib/database.types';
 
 interface AuthContextType {
+  supabase: SupabaseClient<Database>;
   session: Session | null;
   user: User | null;
   loading: boolean;
@@ -12,58 +14,66 @@ interface AuthContextType {
 }
 
 // Create the context with a default value
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const defaultSupabase = createClient();
+const AuthContext = createContext<AuthContextType>({ 
+  supabase: defaultSupabase as SupabaseClient<Database>,
+  session: null, 
+  user: null, 
+  loading: true, 
+  logout: async () => {} 
+});
 
 // Create the provider component
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const supabase = createClient();
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Function to get the initial session
-    const getInitialSession = async () => {
-      try {
-        const { data: { session: initialSession }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        setSession(initialSession);
-        setUser(initialSession?.user ?? null);
-      } catch (error) {
-        console.error('Error getting initial session:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const initializeAuth = async () => {
+      const getInitialSession = async () => {
+        try {
+          const { data: { session: initialSession }, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          setSession(initialSession);
+          setUser(initialSession?.user ?? null);
+        } catch (error) {
+          console.error('Error getting initial session:', error);
+        } finally {
+          setLoading(false);
+        }
+      };
 
-    getInitialSession();
+      await getInitialSession();
 
-    // Set up the auth state change listener
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log('Auth state changed:', _event, session);
-      setSession(session);
-      setUser(session?.user ?? null);
-      // No need to set loading here, initial load is handled
-    });
+      const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+        console.log('Auth state changed:', _event, session);
+        setSession(session);
+        setUser(session?.user ?? null);
+      });
 
-    // Cleanup listener on component unmount
-    return () => {
-      authListener?.subscription.unsubscribe();
-    };
-  }, []);
+      return () => {
+        authListener?.subscription.unsubscribe();
+      };
+    }
 
-  // Logout function
+    const cleanupPromise = initializeAuth();
+
+    return () => { cleanupPromise.then(cleanup => cleanup?.()); };
+  }, [supabase]);
+
   const logout = async () => {
     setLoading(true);
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('Error logging out:', error);
-      // Optionally set an error state here
     }
-    // State will be updated by onAuthStateChange listener
     setLoading(false);
   };
 
-  const value = {
+  const value: AuthContextType = {
+    supabase,
     session,
     user,
     loading,
@@ -76,8 +86,5 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 // Custom hook to use the AuthContext
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
   return context;
 };

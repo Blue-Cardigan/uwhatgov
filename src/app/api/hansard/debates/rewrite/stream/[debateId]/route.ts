@@ -3,7 +3,9 @@ import { getHansardDebate } from '@/lib/hansardService';
 import { generateDebateStream } from '@/lib/geminiService';
 import { GenerateContentStreamResult } from '@google/generative-ai';
 import { DebateContentItem } from '@/lib/hansard/types'; // Assuming types are here
-import { createClient } from '@supabase/supabase-js'; // Import Supabase client
+// Use the server client from @supabase/ssr
+import { createClient } from '@/lib/supabase/server';
+import type { Database } from '@/lib/database.types';
 
 // Define the expected structure for the event stream data
 interface StreamEvent {
@@ -19,18 +21,6 @@ export const maxDuration = 60; // Set max duration for Vercel Edge Functions (ad
 // Keep-alive interval (e.g., 25 seconds)
 const PING_INTERVAL_MS = 25 * 1000;
 
-// Initialize Supabase client
-// Use NEXT_PUBLIC_ variables for consistency with frontend, but ideally use server-side specific keys if RLS requires service_role for writes.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("[API Route /stream] Supabase URL or Anon Key is missing.");
-  // Consider how to handle this globally or per-request. For now, log and continue.
-}
-// Ensure client is initialized only once if possible, or handle potential issues with Edge runtime re-initialization.
-const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
-
 // Define Speech type based on ChatView usage
 interface Speech {
   speaker: string;
@@ -41,10 +31,19 @@ interface Speech {
 
 export async function GET(
     request: NextRequest,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    { params }: { params: any } // Destructure directly, use any for params type
+    { params }: { params: { debateId: string } }
 ) {
-    const debateId = params.debateId as string; // Use debateId from params, assert type
+    // Create the server client inside the handler
+    const supabase = createClient();
+    const debateId = params.debateId;
+
+    // Check auth using the server client
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        console.log(`[API Stream /${debateId}] Unauthorized access attempt.`);
+        return NextResponse.json({ type: 'error', payload: 'Unauthorized' }, { status: 401 });
+    }
+    console.log(`[API Stream /${debateId}] Authorized request for user ${user.id}.`);
 
     if (!debateId) {
         return NextResponse.json({ error: 'Missing debateId parameter' }, { status: 400 });
@@ -105,17 +104,15 @@ export async function GET(
     let geminiStreamResult: GenerateContentStreamResult | null;
     try {
         // Update status to 'processing' before starting stream
-        if (supabase) {
-            const { error: statusUpdateError } = await supabase
-                .from('casual_debates_uwhatgov')
-                .update({ status: 'success', last_updated_at: new Date().toISOString() })
-                .eq('id', debateId);
-             if (statusUpdateError && statusUpdateError.code !== 'PGRST116') { // Ignore error if row doesn't exist yet
-                 console.warn(`[API Route /stream/${debateId}] Failed to update status to success (might be new debate):`, statusUpdateError.message);
-             } else if (!statusUpdateError) {
-                 console.log(`[API Route /stream/${debateId}] Updated status to success.`);
-             }
-        }
+        const { error: statusUpdateError } = await supabase
+            .from('casual_debates_uwhatgov')
+            .update({ status: 'success', last_updated_at: new Date().toISOString() })
+            .eq('id', debateId);
+         if (statusUpdateError && statusUpdateError.code !== 'PGRST116') { // Ignore error if row doesn't exist yet
+             console.warn(`[API Route /stream/${debateId}] Failed to update status to success (might be new debate):`, statusUpdateError.message);
+         } else if (!statusUpdateError) {
+             console.log(`[API Route /stream/${debateId}] Updated status to success.`);
+         }
 
         geminiStreamResult = await generateDebateStream(combinedText, debateTitle, startIndex);
         if (!geminiStreamResult || !geminiStreamResult.stream) {
@@ -340,11 +337,6 @@ export async function GET(
              // Note: writer.releaseLock() is usually not needed after close/abort
 
             // --- Persist to Supabase ---
-            if (!supabase) {
-                console.error(`[API Route /stream/${debateId}] Supabase client not initialized. Cannot persist data.`);
-                return; // Exit if Supabase client failed to init
-            }
-
             if (streamError) {
                 // Handle failure
                 console.error(`[API Route /stream/${debateId}] Stream failed. Updating status to 'failed'. Error: ${streamError.message}`);
@@ -373,7 +365,7 @@ export async function GET(
                     .upsert({
                         id: debateId,
                         content: contentString,
-                        status: 'completed', // Mark as completed
+                        status: 'success', // Mark as success
                         last_updated_at: new Date().toISOString(), // Explicitly set timestamp
                         error_message: null // Clear any previous error message
                     }, { onConflict: 'id' });

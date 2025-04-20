@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { useAuth } from '@/contexts/AuthContext';
 import { MessageBubble, HighlightedText } from './MessageBubble';
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types';
 import { parsePartyAbbreviation } from '@/lib/partyColors';
 import { TypingIndicator } from './TypingIndicator';
 import { escapeRegExp } from '@/utils/stringUtils';
 import { getBaseSpeakerName } from '@/utils/chatUtils';
+import type { Database } from '@/lib/database.types'; // Assuming database types are generated
 
 // Define types locally for the rewritten version
 export interface Speech {
@@ -22,14 +24,12 @@ interface RewrittenDebate {
   speeches: Speech[];
 }
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Supabase URL or Anon Key is missing.");
+// Type for aggregated reaction summary
+export interface ReactionSummary {
+  emoji: string;
+  count: number;
+  userReacted: boolean;
 }
-const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
 
 // localStorage key for party cache
 const MEMBER_PARTY_CACHE_PREFIX = 'uwhatgov_member_party_';
@@ -72,6 +72,16 @@ const ChatView = forwardRef(({
 
   const [typingSpeakerInfo, setTypingSpeakerInfo] = useState<{ speaker: string, party: string | null } | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true); // State to track scroll position
+
+  // --- Use Auth Context --- NEW
+  const { user, loading: authLoading, supabase } = useAuth(); // Get user and supabase from context
+  const currentUserId = user?.id ?? null; // Get user ID
+  // --- ---
+
+  // --- Reactions State ---
+  const [reactionsMap, setReactionsMap] = useState<Map<number, ReactionSummary[]>>(new Map());
+  const reactionChannelRef = useRef<RealtimeChannel | null>(null);
+  // --- End Reactions State ---
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
@@ -123,6 +133,115 @@ const ChatView = forwardRef(({
         connectEventSource(0);
     }
   }));
+
+  // Function to fetch and aggregate reactions - Updated to use imported supabase client
+  const fetchAndAggregateReactions = useCallback(async (currentDebateId: string, fetchedUserId: string | null) => { // Renamed arg to avoid conflict
+    if (!currentDebateId) {
+        setReactionsMap(new Map());
+        return;
+    }
+    console.log(`[Reactions] Fetching for debate: ${currentDebateId}`);
+
+    type ReactionRow = Database['public']['Tables']['reactions_uwhatgov']['Row'];
+
+    // Use the imported supabase client
+    const { data, error } = await supabase
+      .from('reactions_uwhatgov')
+      .select('speech_original_index, emoji, user_id')
+      .eq('debate_id', currentDebateId);
+
+    if (error) {
+      console.error("[Reactions] Error fetching reactions:", error);
+      setReactionsMap(new Map());
+      return;
+    }
+
+    // Aggregate in the client
+    const newReactionsMap = new Map<number, ReactionSummary[]>();
+    const intermediateMap = new Map<string, { count: number; userReacted: boolean }>();
+
+    (data as ReactionRow[]).forEach(reaction => {
+        if (reaction.speech_original_index === null || reaction.emoji === null) return;
+        const key = `${reaction.speech_original_index}-${reaction.emoji}`;
+        const current = intermediateMap.get(key) ?? { count: 0, userReacted: false };
+        intermediateMap.set(key, {
+            count: current.count + 1,
+            // Use fetchedUserId from args here
+            userReacted: current.userReacted || (fetchedUserId !== null && reaction.user_id === fetchedUserId)
+        });
+    });
+
+    // Convert intermediate map to the final state structure
+    intermediateMap.forEach((summary, key) => {
+        const [indexStr, emoji] = key.split('-');
+        const speechIndex = parseInt(indexStr, 10);
+
+        if (!isNaN(speechIndex)) {
+            const existingSummaries = newReactionsMap.get(speechIndex) ?? [];
+            newReactionsMap.set(speechIndex, [
+                ...existingSummaries,
+                { emoji, count: summary.count, userReacted: summary.userReacted }
+            ]);
+        }
+    });
+
+    // Sort reactions within each index consistently (e.g., by emoji)
+    newReactionsMap.forEach((summaries, index) => {
+        newReactionsMap.set(index, summaries.sort((a, b) => a.emoji.localeCompare(b.emoji)));
+    });
+
+    // console.log('[Reactions] Aggregated map:', newReactionsMap);
+    setReactionsMap(newReactionsMap);
+
+  }, [supabase]); // Dependencies: supabase client is stable, no need to add
+
+  // Effect for reactions fetching and real-time subscription - Updated dependencies
+  useEffect(() => {
+    if (!debateId || authLoading) { // Wait for auth loading to complete
+        setReactionsMap(new Map());
+        if (reactionChannelRef.current) {
+            console.log('[Reactions] Unsubscribing from previous channel (no debate or auth loading).');
+            supabase.removeChannel(reactionChannelRef.current);
+            reactionChannelRef.current = null;
+        }
+        return;
+    }
+
+    // Fetch initial data using user ID from context
+    fetchAndAggregateReactions(debateId, currentUserId);
+
+    type ReactionPayload = RealtimePostgresChangesPayload<{ [key: string]: any }>;
+
+    // Subscribe to changes
+    const channel = supabase.channel(`reactions-for-debate-${debateId}`)
+      .on<ReactionPayload>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reactions_uwhatgov', filter: `debate_id=eq.${debateId}` },
+        (payload: ReactionPayload) => {
+          console.log('[Reactions] Realtime event received:', payload);
+          // Re-fetch using the current user ID from context
+          fetchAndAggregateReactions(debateId, currentUserId);
+        }
+      )
+      .subscribe((status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CHANNEL_ERROR' | 'CLOSED', err?: Error) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`[Reactions] Subscribed to channel for debate ${debateId}`);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.error(`[Reactions] Subscription error for debate ${debateId}:`, status, err);
+          }
+      });
+
+    reactionChannelRef.current = channel;
+
+    // Cleanup function
+    return () => {
+      if (reactionChannelRef.current) {
+        console.log(`[Reactions] Unsubscribing from channel for debate ${debateId}`);
+        supabase.removeChannel(reactionChannelRef.current);
+        reactionChannelRef.current = null;
+      }
+    };
+  }, [debateId, currentUserId, authLoading, fetchAndAggregateReactions]); // Depend on context user ID and auth loading state
 
   // Effect to scroll to highlighted item (triggered from parent search navigation)
   useEffect(() => {
@@ -705,6 +824,9 @@ const ChatView = forwardRef(({
       if (!debateId) {
           return <div className="p-4 text-center text-gray-400">Select a debate to view.</div>;
       }
+      if (authLoading && !rewrittenDebate) { // Show loading indicator while auth is resolving initially
+          return <div className="p-4 text-center text-gray-400">Loading User Info...</div>;
+      }
 
     if (viewMode === 'rewritten') {
       if (isLoadingRewritten) return <div className="p-4 text-center text-gray-400">Loading Casual Version...</div>;
@@ -716,6 +838,11 @@ const ChatView = forwardRef(({
             const itemIndex = speech.originalIndex ?? index; // Use originalIndex if available, fallback to sequential index
             const baseSpeakerName = getBaseSpeakerName(speech.speaker); // Get base name for map lookup
             const partyAbbreviation = speakerPartyMap.get(baseSpeakerName); // Get stored party abbreviation from map
+            // --- Get reactions for this speech --- NEW
+            const currentReactions = speech.originalIndex !== undefined
+                ? reactionsMap.get(speech.originalIndex) ?? []
+                : [];
+            // --- ---
 
             return (
                 <MessageBubble
@@ -728,6 +855,11 @@ const ChatView = forwardRef(({
                     isHighlighted={highlightedIndex === itemIndex} // Check if this item is highlighted
                     itemRef={setItemRef(itemIndex)} // Pass ref callback with correct index
                     partyAbbreviation={partyAbbreviation} // Pass determined party abbreviation (might be undefined/null)
+                    // --- Pass reaction props --- NEW
+                    debateId={debateId} // Pass the debate ID
+                    reactions={currentReactions}
+                    userId={currentUserId} // Use user ID from context
+                    // --- ---
                 />
             );
           })}

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef } from "react";
 import { useState } from "react";
 import Image from "next/image"; // Import next/image
 import { DebateResponse } from "@/lib/hansard/types";
-import { Speech } from "./ChatView";
+import { Speech, ReactionSummary } from "./ChatView";
 import { getPartyColorClass } from "@/lib/partyColors";
+import { ReactionBar } from './ReactionBar'; // Import ReactionBar
 
 // MessageBubble component
 interface MessageBubbleProps {
@@ -15,6 +16,11 @@ interface MessageBubbleProps {
     isHighlighted: boolean;
     itemRef: (el: HTMLDivElement | null) => void; // Ref callback
     partyAbbreviation?: string | null;
+    // --- Reaction Props --- NEW
+    debateId: string | null; // Can be null if no debate selected
+    reactions: ReactionSummary[];
+    userId: string | null;
+    // --- End Reaction Props ---
 }
 
 // Define type for the response from our members API endpoint
@@ -54,7 +60,7 @@ export const HighlightedText = ({ text, query }: { text: string; query: string }
     );
 };
 
-export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, searchQuery, isHighlighted, itemRef, partyAbbreviation }: MessageBubbleProps) => {
+export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, searchQuery, isHighlighted, itemRef, partyAbbreviation, debateId, reactions, userId }: MessageBubbleProps) => {
     const isOwnMessage = false;
     const memberId = (typeof speech.originalIndex === 'number' && originalDebate?.Items)
         ? originalDebate.Items.find(item => item.OrderInSection === speech.originalIndex)?.MemberId
@@ -155,63 +161,86 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
     }, [isInfoboxVisible]); // Re-run effect when isInfoboxVisible changes
 
     return (
-        // Main bubble container - onClick here selects the speech
-        <div ref={itemRef} className={`flex mb-3 gap-2 ${alignment} rounded-lg transition-all duration-150 ease-in-out`} onClick={onClick}>
-            {!isOwnMessage && (
-                 // Portrait container - onClick here toggles infobox
-                 <div
-                    className="flex-shrink-0 w-8 h-8 mt-1 relative cursor-pointer" // Added cursor-pointer
-                    onClick={handleInfoboxToggle}
-                 >
-                    {portraitUrl ? (
-                        <Image
-                            src={portraitUrl}
-                            alt={speech.speaker || 'Speaker'}
-                            width={32} // Add required width prop
-                            height={32} // Add required height prop
-                            className="rounded-full w-full h-full object-cover bg-gray-600 pointer-events-none" // Disable pointer events on img itself
+        // Wrapper div containing portrait, bubble, and reaction bar
+        <div ref={itemRef} className={`flex flex-col mb-3 ${isOwnMessage ? 'items-end' : 'items-start'} rounded-lg transition-all duration-150 ease-in-out`}>
+            {/* Row for Portrait + Bubble Content */}
+            <div className={`flex gap-2 w-full ${alignment}`}>
+                {!isOwnMessage && (
+                    // Portrait container - onClick here toggles infobox
+                    <div
+                        className="flex-shrink-0 w-8 h-8 mt-1 relative cursor-pointer self-start" // Align portrait to top
+                        onClick={handleInfoboxToggle}
+                    >
+                        {portraitUrl ? (
+                            <Image
+                                src={portraitUrl}
+                                alt={speech.speaker || 'Speaker'}
+                                width={32}
+                                height={32}
+                                className="rounded-full w-full h-full object-cover bg-gray-600 pointer-events-none"
+                            />
+                        ) : (
+                            <div className="rounded-full w-full h-full bg-gray-500 flex items-center justify-center text-white text-xs font-semibold pointer-events-none">
+                                {speech.speaker?.charAt(0) || '?'}
+                            </div>
+                        )}
+                        {/* --- Infobox Rendering --- */}
+                        {isInfoboxVisible && memberId && (
+                            <div
+                                ref={infoboxRef}
+                                className="absolute bottom-full left-0 transform translate-y-35 mb-2 w-64 z-50 p-3 bg-[#2a3942] border border-gray-600 rounded-lg shadow-lg text-sm text-gray-200 whitespace-normal"
+                                onClick={(_e) => _e.stopPropagation()}
+                            >
+                                {isLoadingInfo && <p className="text-center text-gray-400 italic">Loading...</p>}
+                                {errorInfo && <p className="text-center text-red-400">Error: {errorInfo}</p>}
+                                {memberInfo && (
+                                    <div>
+                                        <p className="font-semibold text-base mb-1">{memberInfo.name}</p>
+                                        <p className="mb-1">{memberInfo.party}</p>
+                                        <p className="text-xs text-gray-400">{memberInfo.constituency}</p>
+                                    </div>
+                                )}
+                                {!memberInfo && !isLoadingInfo && !errorInfo && <p className="text-center text-gray-400 italic">Details unavailable.</p>}
+                            </div>
+                        )}
+                        {/* --- --- --- */}
+                    </div>
+                )}
+                {/* Bubble Content - Main click target for selecting speech */}
+                <div className={`${baseClasses} ${colors} ${highlightRing}`} onClick={onClick}>
+                    {/* Speaker Name - onClick here toggles infobox */}
+                    <div
+                        className="inline-block relative cursor-pointer"
+                        onClick={handleInfoboxToggle} // Still allow infobox toggle here
+                    >
+                        <p className={`font-semibold text-sm mb-1 ${getPartyColorClass(partyAbbreviation ?? null)} pointer-events-none`}>
+                            <HighlightedText text={speech.speaker || 'Unknown Speaker'} query={searchQuery} />
+                        </p>
+                    </div>
+                    {/* Speech Text */}
+                    <p className="text-sm whitespace-pre-wrap"><HighlightedText text={speech.text} query={searchQuery} /></p>
+                </div>
+                 {/* Add placeholder for own message portrait if needed */} 
+                 {isOwnMessage && <div className="w-8 flex-shrink-0"></div>} 
+            </div>
+
+            {/* --- Reaction Bar --- NEW */} 
+            {/* Positioned below the bubble, aligned with it */} 
+            {/* Conditionally render only if there are reactions or user is logged in */} 
+            {(reactions.length > 0 || userId) && speech.originalIndex !== undefined && debateId && (
+                <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
+                    {/* Adjust max-width to align roughly under the bubble */} 
+                    <div className="max-w-xs sm:max-w-sm md:max-w-md">
+                        <ReactionBar
+                            debateId={debateId}
+                            speechOriginalIndex={speech.originalIndex}
+                            reactions={reactions}
+                            userId={userId}
                         />
-                    ) : (
-                        <div className="rounded-full w-full h-full bg-gray-500 flex items-center justify-center text-white text-xs font-semibold pointer-events-none"> {/* Disable pointer events */}
-                            {speech.speaker?.charAt(0) || '?'}
-                        </div>
-                    )}
-                    {/* --- Infobox Rendering --- */}
-                    {isInfoboxVisible && memberId && (
-                        <div
-                            ref={infoboxRef} // Add ref to the infobox itself
-                            className="absolute bottom-full left-0 transform translate-y-35 mb-2 w-64 z-50 p-3 bg-[#2a3942] border border-gray-600 rounded-lg shadow-lg text-sm text-gray-200 whitespace-normal" // Increased z-index
-                            onClick={(_e) => _e.stopPropagation()} // Prevent clicks inside infobox from closing it - prefix unused 'e'
-                        >
-                             {isLoadingInfo && <p className="text-center text-gray-400 italic">Loading...</p>}
-                             {errorInfo && <p className="text-center text-red-400">Error: {errorInfo}</p>}
-                             {memberInfo && (
-                                <div>
-                                    <p className="font-semibold text-base mb-1">{memberInfo.name}</p>
-                                    <p className="mb-1">{memberInfo.party}</p>
-                                    <p className="text-xs text-gray-400">{memberInfo.constituency}</p>
-                                </div>
-                             )}
-                             {!memberInfo && !isLoadingInfo && !errorInfo && <p className="text-center text-gray-400 italic">Details unavailable.</p>}
-                         </div>
-                    )}
-                    {/* --- --- --- */}
+                    </div>
                 </div>
             )}
-            {/* Bubble Content */}
-            <div className={`${baseClasses} ${colors} ${highlightRing}`}>
-                 {/* Speaker Name - onClick here toggles infobox */} 
-                 <div
-                    className="inline-block relative cursor-pointer" // Added cursor-pointer
-                    onClick={handleInfoboxToggle}
-                 >
-                    <p className={`font-semibold text-sm mb-1 ${getPartyColorClass(partyAbbreviation ?? null)} pointer-events-none`}>
-                        <HighlightedText text={speech.speaker || 'Unknown Speaker'} query={searchQuery} />
-                    </p>
-                 </div>
-                 {/* Speech Text - Clicking here still triggers the main bubble onClick */}
-                <p className="text-sm whitespace-pre-wrap"><HighlightedText text={speech.text} query={searchQuery} /></p>
-            </div>
+            {/* --- --- --- */} 
         </div>
     );
 };

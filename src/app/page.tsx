@@ -12,6 +12,9 @@ import OriginalContribution from '@/components/OriginalContribution'; // Import 
 import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the icon
 import { AuthForm } from '@/components/AuthForm'; // Import AuthForm
 import DebateInitializer from '@/components/DebateInitializer'; // Import the new component
+import SummaryViewer from '@/components/SummaryViewer'; // Import new component
+import OriginalDebateViewer from '@/components/OriginalDebateViewer'; // Import new component
+import SearchHeader from '@/components/SearchHeader'; // Import new component
 
 // Import types
 import { InternalDebateSummary, DebateMetadata } from '@/types';
@@ -20,6 +23,7 @@ import { Speech } from '@/components/ChatView'; // Import Speech type
 
 // Import context hook
 import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useDebateSearch } from '@/hooks/useDebateSearch'; // Import new hook
 
 // Define type for the ChatView ref methods
 interface ChatViewHandle {
@@ -83,6 +87,25 @@ export default function Home() {
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [errorSummary, setErrorSummary] = useState<string | null>(null);
+
+  // Use the custom hook for search state and logic
+  const {
+    isSearchOpen: useDebateSearchIsSearchOpen,
+    setIsSearchOpen: useDebateSearchSetIsSearchOpen,
+    searchQuery: useDebateSearchQuery,
+    setSearchQuery: useDebateSearchSetSearchQuery,
+    searchResults: useDebateSearchResults,
+    currentMatchIndex: useDebateSearchCurrentMatchIndex,
+    handleSearchChange: useDebateSearchHandleSearchChange,
+    goToNextMatch: useDebateSearchGoToNextMatch,
+    goToPreviousMatch: useDebateSearchGoToPreviousMatch,
+    closeSearch: useDebateSearchCloseSearch,
+  } = useDebateSearch({
+    viewMode,
+    originalDebate,
+    rewrittenDebateRef, // Pass the ref
+    chatViewRef,        // Pass ChatView ref for scrolling
+  });
 
   // Fetch Original Debate Data (incorporates memory & localStorage caching)
   const fetchOriginalDebate = useCallback(async (debateId: string | null) => {
@@ -259,6 +282,8 @@ export default function Home() {
       setSelectedDebateMetadata(null);
       setSummaryText(null);
       setIsSummaryOpen(false);
+      setSelectedOriginalIndex(null);
+      useDebateSearchCloseSearch();
       router.push('/');
       return;
     }
@@ -271,10 +296,7 @@ export default function Home() {
     setSelectedDebateId(debateId);
     setViewMode('rewritten');
     setSelectedOriginalIndex(null);
-    setSearchQuery('');
-    setIsSearchOpen(false);
-    setSearchResults([]);
-    setCurrentMatchIndex(-1);
+    useDebateSearchCloseSearch();
     setSelectedDebateSummary(null);
     setOriginalDebate(null);
     setSummaryText(null);
@@ -284,10 +306,11 @@ export default function Home() {
     fetchSelectedDebateMetadata(debateId);
     fetchOriginalDebate(debateId);
 
-  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, router]);
+  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, router, useDebateSearchCloseSearch]);
 
   // Specific handler for selection coming *from* the ChatList component
   const handleSelectDebateFromList = useCallback((debateSummary: InternalDebateSummary) => {
+    setSelectedDebateSummary(debateSummary);
     handleDebateSelect(debateSummary.id);
   }, [handleDebateSelect]);
 
@@ -363,13 +386,13 @@ export default function Home() {
   // --- SEARCH LOGIC ---
   useEffect(() => {
     // Perform search whenever query, viewMode, or data changes
-    if (searchQuery.trim() === '') {
+    if (useDebateSearchQuery.trim() === '') {
       setSearchResults([]);
       setCurrentMatchIndex(-1);
       return;
     }
 
-    const query = searchQuery.trim().toLowerCase();
+    const query = useDebateSearchQuery.trim().toLowerCase();
     let results: number[] = [];
 
     if (viewMode === 'rewritten') {
@@ -396,42 +419,16 @@ export default function Home() {
     setSearchResults(results);
     setCurrentMatchIndex(results.length > 0 ? 0 : -1);
 
-  }, [searchQuery, viewMode, originalDebate, rewrittenDebateRef]); // Added rewrittenDebateRef dependency
+  }, [useDebateSearchQuery, viewMode, originalDebate, rewrittenDebateRef]); // Added rewrittenDebateRef dependency
 
   // Effect to scroll to the current match
   useEffect(() => {
-      if (currentMatchIndex !== -1 && searchResults.length > 0) {
-          const targetIndex = searchResults[currentMatchIndex];
-          console.log(`Scrolling to search result index: ${targetIndex} (result ${currentMatchIndex + 1} of ${searchResults.length})`);
+      if (useDebateSearchCurrentMatchIndex !== -1 && useDebateSearchResults.length > 0) {
+          const targetIndex = useDebateSearchResults[useDebateSearchCurrentMatchIndex];
+          console.log(`Scrolling to search result index: ${targetIndex} (result ${useDebateSearchCurrentMatchIndex + 1} of ${useDebateSearchResults.length})`);
           chatViewRef.current?.scrollToItem(targetIndex);
       }
-  }, [currentMatchIndex, searchResults]);
-
-
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(event.target.value);
-  };
-
-  const goToNextMatch = () => {
-    if (searchResults.length > 0) {
-      setCurrentMatchIndex((prevIndex) => (prevIndex + 1) % searchResults.length);
-    }
-  };
-
-  const goToPreviousMatch = () => {
-    if (searchResults.length > 0) {
-      setCurrentMatchIndex((prevIndex) => (prevIndex - 1 + searchResults.length) % searchResults.length);
-    }
-  };
-
-  // Clear search when debate changes or view mode switches
-  useEffect(() => {
-      setSearchQuery('');
-      setSearchResults([]);
-      setCurrentMatchIndex(-1);
-  }, [selectedDebateId, viewMode]);
-
-  // --- END SEARCH LOGIC ---
+  }, [useDebateSearchCurrentMatchIndex, useDebateSearchResults]);
 
   // Handle clicking a bubble in ChatView (passed down as prop)
   const handleBubbleClick = useCallback((index: number | undefined) => {
@@ -447,7 +444,6 @@ export default function Home() {
         setSelectedOriginalIndex(null); // Close panel if index is invalid
     }
   }, [originalDebate, isLoadingOriginal, selectedDebateId, fetchOriginalDebate]);
-
 
   // Handler for toggling the view mode - Now switches between the two modes
   const handleToggleViewMode = useCallback(() => {
@@ -506,7 +502,7 @@ export default function Home() {
       : null;
 
   // Calculate the index of the currently highlighted search result
-  const highlightedIndex = currentMatchIndex !== -1 ? searchResults[currentMatchIndex] : null;
+  const highlightedIndex = useDebateSearchCurrentMatchIndex !== -1 ? useDebateSearchResults[useDebateSearchCurrentMatchIndex] : null;
 
   // Stable callback for ChatView to update the parent's ref with rewritten speeches
   const handleRewrittenDebateUpdate = useCallback((speeches: Speech[]) => {
@@ -593,40 +589,16 @@ export default function Home() {
             <header className="p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10 h-16">
                {/* Search Open State */}
                {isSearchOpen ? (
-                 <div className="flex items-center w-full">
-                   <button
-                     onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
-                     className="p-1 text-gray-400 hover:text-white mr-2"
-                     aria-label="Close search"
-                   >
-                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                       <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
-                     </svg>
-                   </button>
-                   <input
-                     type="text"
-                     placeholder="Search debate..."
-                     value={searchQuery}
-                     onChange={handleSearchChange}
-                     className="flex-grow bg-transparent text-sm text-gray-200 placeholder-gray-500 focus:outline-none px-2 py-1"
-                     autoFocus // Focus the input when it opens
-                     disabled={!selectedDebateId}
-                   />
-                   {searchQuery && (
-                     <button onClick={() => setSearchQuery('')} className="ml-1 text-gray-500 hover:text-gray-300 text-xs p-0.5">&times;</button>
-                   )}
-                   {searchResults.length > 0 && (
-                     <span className="text-xs text-gray-500 ml-2 whitespace-nowrap">
-                       {currentMatchIndex + 1}/{searchResults.length}
-                     </span>
-                   )}
-                   <button onClick={goToPreviousMatch} disabled={searchResults.length <= 1} className="ml-1 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
-                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M14.77 12.79a.75.75 0 0 1-1.06 0L10 9.06l-3.71 3.73a.75.75 0 1 1-1.06-1.06l4.24-4.25a.75.75 0 0 1 1.06 0l4.24 4.25a.75.75 0 0 1 0 1.06Z" clipRule="evenodd" /></svg> {/* Up Arrow */}
-                   </button>
-                   <button onClick={goToNextMatch} disabled={searchResults.length <= 1} className="ml-0.5 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
-                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" /></svg> {/* Down Arrow */}
-                   </button>
-                 </div>
+                 <SearchHeader
+                   searchQuery={useDebateSearchQuery}
+                   searchResultsCount={useDebateSearchResults.length}
+                   currentMatchIndex={useDebateSearchCurrentMatchIndex}
+                   onSearchChange={useDebateSearchHandleSearchChange}
+                   onCloseSearch={useDebateSearchCloseSearch}
+                   onClearQuery={() => useDebateSearchSetSearchQuery('')}
+                   onGoToPreviousMatch={useDebateSearchGoToPreviousMatch}
+                   onGoToNextMatch={useDebateSearchGoToNextMatch}
+                 />
                ) : (
                  /* Default Header View */
                  <>
@@ -667,7 +639,7 @@ export default function Home() {
 
                      {/* Search Icon */}
                      <button
-                       onClick={() => setIsSearchOpen(true)}
+                       onClick={() => useDebateSearchSetIsSearchOpen(true)}
                        className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                        title="Search debate"
                        disabled={!selectedDebateId || isRegenerating}
@@ -723,27 +695,13 @@ export default function Home() {
             </header>
 
             {/* Summary Dropdown Panel - Positioned absolutely BELOW the header */}
-            {isSummaryOpen && (
-                <div className="absolute top-16 left-0 right-0 z-30 bg-[#111b21] border-b border-gray-700 shadow-lg p-4 text-sm max-h-48 overflow-y-auto">
-                     {/* Close button for the dropdown */}
-                     <button
-                        onClick={() => setIsSummaryOpen(false)}
-                        className="absolute top-1 right-1 text-gray-500 hover:text-white p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-xs z-40"
-                        title="Close summary"
-                     >
-                            ✕
-                     </button>
-                     {isLoadingSummary ? (
-                         <span className="italic text-gray-400 animate-pulse">Generating summary...</span>
-                     ) : errorSummary ? (
-                         <span className="text-red-400 italic">Error: {errorSummary}</span>
-                     ) : summaryText ? (
-                         <p className="text-gray-300 pr-4">{summaryText}</p> 
-                     ) : (
-                         <span className="italic text-gray-500">No summary available or not generated yet.</span>
-                     )}
-                </div>
-            )}
+            <SummaryViewer
+              isOpen={isSummaryOpen}
+              isLoading={isLoadingSummary}
+              error={errorSummary}
+              text={summaryText}
+              onClose={() => setIsSummaryOpen(false)}
+            />
 
             {/* ChatView Wrapper (handles scrolling) */}
             {/* Added conditional padding top ONLY if summary dropdown is open */}
@@ -758,50 +716,24 @@ export default function Home() {
                 fetchOriginalDebate={() => fetchOriginalDebate(selectedDebateId)} // Pass fetch function
                 selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
                 onBubbleClick={handleBubbleClick} // Pass handler down
-                searchQuery={searchQuery} // Pass search query
+                searchQuery={useDebateSearchQuery} // Pass search query
                 highlightedIndex={highlightedIndex} // Pass highlighted item's index
                 onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback
               />
             </div>
 
-
             {/* Resizable Panel (Positioned absolutely at the bottom) */}
             {viewMode === 'rewritten' && selectedOriginalIndex !== null && (
-                <Resizable
-                      size={{ width: '100%', height: originalPanelHeight }}
-                      minHeight={100}
-                      maxHeight={typeof window !== 'undefined' ? window.innerHeight * 0.7 : 500}
-                      enable={{ top: true, right: false, bottom: false, left: false, topRight: false, bottomRight: false, bottomLeft: false, topLeft: false }}
-                      onResizeStop={(e, direction, ref, d) => {
-                          setOriginalPanelHeight(originalPanelHeight + d.height);
-                      }}
-                      className="absolute bottom-0 left-0 right-0 bg-[#111b21] border-t border-gray-700 z-20 overflow-hidden flex flex-col shadow-lg"
-                      handleComponent={{ top: <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-10 h-2 bg-gray-600 hover:bg-gray-500 rounded cursor-ns-resize" /> }}
-                    >
-                    {/* Inner container for padding and scrolling */}
-                    <div className="p-4 overflow-y-auto flex-grow">
-                        {selectedOriginalItem ? (
-                            <>
-                                <h3 className="text-sm font-semibold text-blue-300 mb-2">Original Contribution (Index: {selectedOriginalIndex})</h3>
-                                <OriginalContribution item={selectedOriginalItem} />
-                            </>
-                        ) : isLoadingOriginal ? (
-                            <div className="text-center text-gray-400">Loading original text...</div>
-                        ) : errorOriginal ? (
-                                 <div className="text-center text-red-400">Error loading original: {errorOriginal}</div>
-                            ) : (
-                                 <div className="text-center text-gray-500">Original contribution not found or loading.</div>
-                            )}
-                    </div>
-                     {/* Close Button */}
-                     <button
-                         onClick={() => setSelectedOriginalIndex(null)} // Close panel
-                         className="absolute top-2 right-2 text-gray-400 hover:text-white p-1 rounded-full bg-gray-600 hover:bg-gray-500 text-xs z-30"
-                         title="Close original view"
-                     >
-                         ✕
-                     </button>
-                   </Resizable>
+                <OriginalDebateViewer
+                  viewMode={viewMode}
+                  selectedOriginalIndex={selectedOriginalIndex}
+                  selectedOriginalItem={selectedOriginalItem}
+                  isLoadingOriginal={isLoadingOriginal}
+                  errorOriginal={errorOriginal}
+                  originalPanelHeight={originalPanelHeight}
+                  setOriginalPanelHeight={setOriginalPanelHeight}
+                  onClose={() => setSelectedOriginalIndex(null)}
+                />
             )}
 
             {/* Footer */}
@@ -815,16 +747,16 @@ export default function Home() {
           // Placeholder when no debate is selected
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
              <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
+               <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
+               <p className="my-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
                <Image 
                  src="/whatguv.svg" 
                  alt="UWhatGov Logo" 
-                 width={100}
-                 height={100}
-                 className="text-gray-500 mx-auto opacity-50"
+                 width={200}
+                 height={200}
+                 className="text-gray-500 opacity-50 border-b border-gray-600 mx-auto"
                />
-               <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
-               <p className="mt-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
-               <div className="mt-8 border-t border-gray-600 pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>
+               <div className="pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>
              </div>
           </div>
         )}

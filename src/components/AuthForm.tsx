@@ -1,13 +1,16 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+// Import the hook to get the SSR-compatible client instance from context
+import { useAuth } from '@/contexts/AuthContext';
 
 interface AuthFormProps {
   onSuccess?: () => void; // Optional callback on successful sign-in/sign-up
 }
 
 export function AuthForm({ onSuccess }: AuthFormProps) {
+  // Get the supabase client instance from the context
+  const { supabase } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
