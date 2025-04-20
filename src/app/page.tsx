@@ -304,8 +304,9 @@ export default function Home() {
     router.push(`/?debateId=${debateId}`);
     fetchSelectedDebateMetadata(debateId);
     fetchOriginalDebate(debateId);
+    fetchSummary(debateId); // Fetch the summary for the newly selected debate
 
-  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, router, closeDebateSearch]); // Added closeDebateSearch dependency
+  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, fetchSummary, router, closeDebateSearch]); // Added fetchSummary and closeDebateSearch dependency
 
   // Specific handler for selection coming *from* the ChatList component
   const handleSelectDebateFromList = useCallback((debateSummary: InternalDebateSummary) => {
