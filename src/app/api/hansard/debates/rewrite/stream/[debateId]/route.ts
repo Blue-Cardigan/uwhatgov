@@ -94,6 +94,9 @@ export async function GET(
 
     // --- Transform Gemini stream to SSE ---
     let pingIntervalId: NodeJS.Timeout | null = null;
+    let buffer = ''; // Buffer to hold incomplete JSON strings
+    let hasSentValidSpeech = false; // Track if any valid speech was sent
+
     const transformStream = new TransformStream({
         start(controller) {
             console.log(`[API Route /stream/${debateId}] SSE Transformer started.`);
@@ -109,19 +112,73 @@ export async function GET(
         // The transform method receives chunks written to the writable side
         async transform(chunk: EnhancedGenerateContentResponse, controller) {
              try {
-                // Extract text from the Gemini response chunk
-                 const chunkString = chunk.text();
-                const streamEvent: StreamEvent = { type: 'chunk', payload: chunkString };
-                // Escape newline characters in the JSON string for SSE data field
-                const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
-                controller.enqueue(`data: ${formattedData}\n\n`);
+                 // Append new chunk text to the buffer
+                 buffer += chunk.text();
+
+                 // Attempt to find and process complete JSON objects in the buffer
+                 let lastIndex = 0;
+                 while (true) {
+                     const startIndex = buffer.indexOf('{', lastIndex);
+                     if (startIndex === -1) break; // No more potential objects
+
+                     let openBraces = 0;
+                     let endIndex = -1;
+                     for (let i = startIndex; i < buffer.length; i++) {
+                         if (buffer[i] === '{') {
+                             openBraces++;
+                         } else if (buffer[i] === '}') {
+                             openBraces--;
+                             if (openBraces === 0) {
+                                 endIndex = i;
+                                 break;
+                             }
+                         }
+                     }
+
+                     if (endIndex !== -1) {
+                         // Found a potential complete object
+                         const potentialJson = buffer.substring(startIndex, endIndex + 1);
+                         try {
+                             // Verify it's valid JSON (don't need the parsed object)
+                             JSON.parse(potentialJson);
+
+                             // Send the verified JSON object as a chunk
+                             const parsedSpeech = JSON.parse(potentialJson);
+                             if (parsedSpeech && typeof parsedSpeech.text === 'string' && parsedSpeech.text.trim()) {
+                                 hasSentValidSpeech = true; // Mark that we found a valid speech
+                                 const streamEvent: StreamEvent = { type: 'chunk', payload: potentialJson }; // Send original JSON string
+                                 // Escape newline characters *within* the JSON string for SSE data field
+                                 const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
+                                 controller.enqueue(`data: ${formattedData}\n\n`);
+                             } else {
+                                 console.warn(`[API Route /stream/${debateId}] Skipping empty or invalid speech object: ${potentialJson.substring(0,100)}...`);
+                             }
+
+                             // Remove the processed object from the buffer
+                             buffer = buffer.substring(endIndex + 1);
+                             lastIndex = 0; // Reset search from the beginning of the modified buffer
+                         } catch (parseError) {
+                             // It wasn't valid JSON, maybe braces were mismatched or inside strings.
+                             // Advance lastIndex to search past the start brace we found.
+                             console.warn(`[API Route /stream/${debateId}] Partial match is not valid JSON yet: ${potentialJson.substring(0,100)}...`);
+                             lastIndex = startIndex + 1;
+                         }
+                     } else {
+                         // No closing brace found for the starting brace at startIndex
+                         // The rest of the buffer is potentially an incomplete object
+                         break;
+                     }
+                 }
+
              } catch (error: any) {
                 console.error(`[API Route /stream/${debateId}] Error processing Gemini chunk:`, error);
-                // Send an error event downstream if a chunk fails processing
+                // Send a generic error event downstream if chunk processing fails
                  const errorEvent: StreamEvent = { type: 'error', payload: { message: `Error processing stream chunk: ${error.message}` } };
                  // Escape newline characters in the JSON string for SSE data field
                  const formattedData = JSON.stringify(errorEvent).replace(/\n/g, '\\n');
                  controller.enqueue(`data: ${formattedData}\n\n`);
+                 // Clear buffer on significant error? Maybe not, depends on desired recovery.
+                 // buffer = '';
              }
         },
         // Flush is called when the writable side is closed
@@ -130,15 +187,60 @@ export async function GET(
                 clearInterval(pingIntervalId);
                 pingIntervalId = null;
             }
-            const completeEvent: StreamEvent = { type: 'complete' };
-            // Escape newline characters in the JSON string for SSE data field
-            const formattedData = JSON.stringify(completeEvent).replace(/\n/g, '\\n');
-            controller.enqueue(`data: ${formattedData}\n\n`);
-            console.log(`[API Route /stream/${debateId}] SSE Transformer flushed (Gemini stream ended).`);
-            // No need to call controller.terminate() here; closing the writer does this.
+
+            // Process any remaining data in the buffer when the stream ends
+            let finalPayload = buffer.trim();
+            if (finalPayload) {
+                console.log(`[API Route /stream/${debateId}] Flushing remaining buffer content: "${finalPayload.substring(0, 200)}..."`);
+                 try {
+                    // Try parsing the remaining buffer as is
+                    JSON.parse(finalPayload);
+                    // If it parses, send it directly
+                 } catch (parseError: any) {
+                      // Parsing failed - potentially incomplete JSON
+                      console.warn(`[API Route /stream/${debateId}] Remaining buffer is not valid JSON: "${finalPayload.substring(0,100)}...". Attempting completion.`);
+                      // Attempt to complete it if it looks like an unclosed object
+                      if (finalPayload.startsWith('{') && !finalPayload.endsWith('}')) {
+                           console.log(`[API Route /stream/${debateId}] Appending '}' to incomplete JSON.`);
+                           finalPayload += '}';
+                           // Optional: Verify again after appending '}'
+                           try {
+                               JSON.parse(finalPayload);
+                               console.log(`[API Route /stream/${debateId}] Completion successful.`);
+                           } catch (completionParseError) {
+                               console.error(`[API Route /stream/${debateId}] Failed to parse after completing with '}':`, completionParseError);
+                               // Decide what to do: send the attempted completion, send an error, or send nothing?
+                               // Let's send the attempted completion for the client to handle.
+                           }
+                      } else {
+                          // Doesn't look like a simple unclosed object, send error maybe?
+                          // Or just send the fragment as is. Let's send as is for now.
+                          console.warn(`[API Route /stream/${debateId}] Remaining buffer doesn't appear to be simple incomplete JSON. Sending as is.`);
+                      }
+                 }
+                 // Send the final (potentially completed) buffer content as a chunk
+                  const streamEvent: StreamEvent = { type: 'chunk', payload: finalPayload };
+                  const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
+                  controller.enqueue(`data: ${formattedData}\n\n`);
+            }
+             buffer = ''; // Clear buffer
+
+            // Finally, send the complete event
+            if (hasSentValidSpeech) {
+                 const completeEvent: StreamEvent = { type: 'complete' };
+                 // Escape newline characters in the JSON string for SSE data field
+                 const formattedCompleteData = JSON.stringify(completeEvent).replace(/\n/g, '\\n');
+                 controller.enqueue(`data: ${formattedCompleteData}\n\n`);
+                 console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with completion (Gemini stream ended).`);
+            } else {
+                 console.warn(`[API Route /stream/${debateId}] No valid speeches found/generated. Sending error instead of complete.`);
+                 const errorEvent: StreamEvent = { type: 'error', payload: { message: 'No valid speeches found in the debate.' } };
+                 const formattedErrorData = JSON.stringify(errorEvent).replace(/\n/g, '\\n');
+                 controller.enqueue(`data: ${formattedErrorData}\n\n`);
+                 console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with error (no valid content).`);
+            }
         }
     });
-
 
     // Function to pipe the AsyncGenerator to the WritableStream
     const pipeGeneratorToStream = async () => {

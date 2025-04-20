@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { InternalDebateSummary } from '@/types';
+import { InternalDebateSummary, DebateMetadata } from '@/types';
 // Import Hansard API types
 import { SearchResult, DebateSummary } from '@/lib/hansard/types';
+import DebateMetadataIcon from './DebateMetadataIcon'; // Import the new icon component
+import { DebateMetadataResponse } from '@/app/api/hansard/debates/[debateId]/metadata/route'; // Import response type
 
 interface ChatListProps {
   onSelectDebate: (debateSummary: InternalDebateSummary) => void;
@@ -18,6 +20,10 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
   const [lastSittingDate, setLastSittingDate] = useState<string | null>(null);
   const [oldestDateLoaded, setOldestDateLoaded] = useState<string | null>(null);
   const [canLoadMore, setCanLoadMore] = useState(true);
+  const [metadataCache, setMetadataCache] = useState<Record<string, DebateMetadata>>({});
+  const observedItemsRef = useRef<Map<string, IntersectionObserverEntry>>(new Map());
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   // Helper to format date string
   const formatDate = (isoDateString: string) => {
@@ -85,6 +91,40 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     }
   }, []);
 
+  // Function to fetch metadata for a specific debate ID
+  const fetchMetadata = useCallback(async (debateId: string) => {
+    // Avoid fetching if already cached or currently loading
+    if (metadataCache[debateId]?.isLoading || metadataCache[debateId]?.partyRatios) {
+        // console.log(`[Metadata ${debateId}] Skipping fetch (loading or cached).`);
+        return;
+    }
+
+    // Mark as loading
+    setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId]), isLoading: true, error: null } }));
+    console.log(`[Metadata ${debateId}] Fetching...`);
+
+    try {
+        const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
+        if (!response.ok) {
+            let errorMsg = `Metadata fetch failed: ${response.status}`;
+            try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) { }
+            throw new Error(errorMsg);
+        }
+        const metadata: DebateMetadataResponse = await response.json();
+        setMetadataCache(prev => ({
+            ...prev,
+            [debateId]: { ...metadata, isLoading: false, error: null }
+        }));
+        console.log(`[Metadata ${debateId}] Success.`);
+    } catch (e: any) {
+        console.error(`[Metadata ${debateId}] Failed:`, e);
+        setMetadataCache(prev => ({
+            ...prev,
+            [debateId]: { ...(prev[debateId]), isLoading: false, error: e.message || 'Failed to load' }
+        }));
+    }
+  }, [metadataCache]); // Depend on metadataCache
+
   // Fetch last sitting date on mount
   useEffect(() => {
     fetchLastSittingDate();
@@ -129,9 +169,11 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
                 house: debate.House,
             }));
             setDebates(mappedDebates);
+            setMetadataCache({}); // Clear metadata on new search
         } catch (e: any) {
             console.error(`Failed to fetch search results from ${searchUrl}:`, e);
-            setError(`Failed to load search results: ${e.message}`);
+            setError(`Search failed: ${e.message}`);
+            setMetadataCache({}); // Clear metadata on new search
         } finally {
             setIsLoading(false);
         }
@@ -182,6 +224,57 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     // Also depends on handleLoadPreviousDay potentially changing if its deps change
   }, [isLoading, canLoadMore, handleLoadPreviousDay, searchTerm]);
 
+  // Use a single observer for all items
+  useEffect(() => {
+      observerRef.current = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+              const debateId = (entry.target as HTMLElement).dataset.debateId;
+              if (debateId) {
+                  if (entry.isIntersecting) {
+                      observedItemsRef.current.set(debateId, entry);
+                      // Fetch metadata when item becomes visible
+                      fetchMetadata(debateId);
+                  } else {
+                      observedItemsRef.current.delete(debateId);
+                  }
+              }
+          });
+      }, { rootMargin: '200px 0px', threshold: 0.01 }); // Fetch slightly before fully visible
+
+      const currentObserver = observerRef.current;
+
+      // Re-observe items when debates change
+      itemRefs.current.forEach(el => {
+          if (el) currentObserver.observe(el);
+      });
+
+      return () => {
+          itemRefs.current.forEach(el => {
+              if (el) currentObserver.unobserve(el);
+          });
+          currentObserver.disconnect();
+          observerRef.current = null;
+      };
+  }, [debates, fetchMetadata]); // Re-run if debates or fetchMetadata changes
+
+  // Function to set ref for each item
+  const setItemRef = (debateId: string, element: HTMLDivElement | null) => {
+      if (element) {
+          itemRefs.current.set(debateId, element);
+          // Observe new elements as they are added
+          if (observerRef.current) {
+              observerRef.current.observe(element);
+          }
+      } else {
+          // Clean up ref and observer if element is removed
+          if (observerRef.current) {
+              const existingEl = itemRefs.current.get(debateId);
+              if (existingEl) observerRef.current.unobserve(existingEl);
+          }
+          itemRefs.current.delete(debateId);
+      }
+  };
+
   return (
     <div className="flex flex-col h-full bg-[#111b21]">
       {/* Search Bar */}
@@ -211,12 +304,14 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
           const isSelected = debate.id === selectedDebateId; // Check if this debate is selected
           return (
               <div
+                ref={(el) => setItemRef(debate.id, el)}
+                data-debate-id={debate.id}
                 key={debate.id}
                 onClick={() => onSelectDebate(debate)}
                 className={`p-3 cursor-pointer transition-colors duration-150 flex items-center gap-3 ${isSelected ? 'bg-teal-800' : 'hover:bg-[#2a3942]'}`}
               >
                 {/* Placeholder for Avatar/Icon */}
-                <div className="w-10 h-10 bg-gray-600 rounded-full flex-shrink-0"></div>
+                <DebateMetadataIcon metadata={metadataCache[debate.id]} />
                 <div className="flex-grow overflow-hidden">
                   <div className="flex justify-between items-center mb-1">
                     <h3 className="font-semibold text-gray-100 truncate" title={debate.title}>{debate.title}</h3>
@@ -224,9 +319,14 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
                   </div>
                   <div className="text-sm text-gray-400 truncate flex justify-between">
                      <span>{debate.house}</span>
-                     {debate.match && (
-                       <span className="text-xs text-teal-400 italic ml-2">Match</span>
-                     )}
+                     <span className="flex items-center gap-2 text-xs whitespace-nowrap ml-2">
+                        {metadataCache[debate.id]?.location && (
+                           <span title="Location">{metadataCache[debate.id]?.location}</span>
+                        )}
+                        {typeof metadataCache[debate.id]?.contributionCount === 'number' && (
+                           <span title="Contributions">({metadataCache[debate.id]?.contributionCount})</span>
+                        )}
+                     </span>
                   </div>
                   {/* Uncomment if you want to show the match snippet in the list */}
                   {/* {debate.match && (

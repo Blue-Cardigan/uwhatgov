@@ -33,21 +33,7 @@ export default function Home() {
   const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null); // Moved from ChatView
   const [originalPanelHeight, setOriginalPanelHeight] = useState(192); // Moved from ChatView, default height (12rem)
 
-
-  // Effect to sync selectedDebateId from URL
-  useEffect(() => {
-    const debateIdFromUrl = searchParams.get('debateId');
-    if (debateIdFromUrl && debateIdFromUrl !== selectedDebateId) {
-      console.log(`Setting selectedDebateId from URL: ${debateIdFromUrl}`);
-      setSelectedDebateId(debateIdFromUrl);
-      // Reset summary and panel state if ID changes from URL
-      setSelectedDebateSummary(null);
-      setSelectedOriginalIndex(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  // Fetch Original Debate Data
+  // Fetch Original Debate Data (Moved Up)
   const fetchOriginalDebate = useCallback(async (debateId: string | null) => { // Allow null ID
       if (!debateId || originalDebate || isLoadingOriginal) return;
 
@@ -71,6 +57,45 @@ export default function Home() {
         setIsLoadingOriginal(false);
       }
     }, [originalDebate, isLoadingOriginal]);
+
+  // Effect to sync selectedDebateId from URL
+  useEffect(() => {
+    const debateIdFromUrl = searchParams.get('debateId');
+    if (debateIdFromUrl && debateIdFromUrl !== selectedDebateId) {
+      console.log(`Setting selectedDebateId from URL: ${debateIdFromUrl}`);
+      setSelectedDebateId(debateIdFromUrl);
+      // Reset summary and panel state if ID changes from URL
+      // setSelectedDebateSummary(null); // Keep summary if navigating internally
+      setSelectedOriginalIndex(null);
+      fetchOriginalDebate(debateIdFromUrl); // Fetch original data immediately
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, fetchOriginalDebate]); // Added fetchOriginalDebate dependency
+
+  // Fetch Original Debate Data
+  const fetchOriginalDebateData = useCallback(async (debateId: string | null) => {
+    if (!debateId || originalDebate || isLoadingOriginal) return;
+
+    console.log(`[page.tsx] Fetching ORIGINAL debate ${debateId}`);
+    setIsLoadingOriginal(true);
+    setErrorOriginal(null);
+    try {
+      const hansardApiUrl = `/api/hansard/debates/${debateId}`;
+      const response = await fetch(hansardApiUrl);
+      if (!response.ok) {
+        let errorMsg = `Original fetch failed: ${response.status}`;
+        try { const errorData = await response.json(); errorMsg = errorData.error || errorData.message || errorMsg; } catch (e) {}
+        throw new Error(errorMsg);
+      }
+      const data: DebateResponse = await response.json();
+      setOriginalDebate(data);
+    } catch (e: any) {
+      console.error(`[page.tsx] Failed fetch original ${debateId}:`, e);
+      setErrorOriginal(`Failed load original: ${e.message}`);
+    } finally {
+      setIsLoadingOriginal(false);
+    }
+  }, [originalDebate, isLoadingOriginal]);
 
   // Handle selecting a debate from the list
   const handleSelectDebate = useCallback((debate: InternalDebateSummary) => {
@@ -135,11 +160,11 @@ export default function Home() {
                <div className="flex items-center gap-3">
                  <div className="w-10 h-10 bg-gray-500 rounded-full"></div>
                  <div className="flex flex-col">
-                   <h2 className="text-md font-semibold text-gray-100 truncate" title={selectedDebateSummary?.title || 'Loading...'}>
-                     {selectedDebateSummary?.title || 'Loading...'}
+                   <h2 className="text-md font-semibold text-gray-100 truncate" title={selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}>
+                     {selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}
                    </h2>
                    <span className="text-xs text-gray-400">
-                     {selectedDebateSummary?.house || '...'}
+                     {selectedDebateSummary?.house || originalDebate?.Overview?.House || '...'}
                    </span>
                  </div>
                </div>

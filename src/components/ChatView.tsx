@@ -19,6 +19,9 @@ interface RewrittenDebate {
 // Type for original raw Hansard response
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types';
 
+// Import party color utility
+import { getPartyColorClassFromName } from '@/lib/partyColors';
+
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -38,6 +41,34 @@ interface ChatViewProps {
   selectedOriginalIndex: number | null; // Receive selected index from parent
   onBubbleClick: (index: number | undefined) => void; // Callback to parent on click
 }
+
+// Helper function to get party color
+const getPartyColor = (speakerName: string | null): string => {
+  if (!speakerName) return 'text-teal-300'; // Default color
+
+  const partyMatch = speakerName.match(/\(([^)]+)\)$/);
+  const partyAbbreviation = partyMatch ? partyMatch[1].split('/')[0].trim() : null; // Get first part before /
+
+  switch (partyAbbreviation) {
+    case 'Con':
+      return 'text-blue-400'; // Conservative
+    case 'DUP':
+      return 'text-orange-400'; // Democratic Unionist Party
+    case 'Lab':
+      return 'text-red-400'; // Labour
+    case 'LD':
+      return 'text-yellow-400'; // Liberal Democrat
+    case 'PC':
+      return 'text-green-400'; // Plaid Cymru
+    case 'UUP':
+      return 'text-purple-400'; // Ulster Unionist Party
+    case 'Ind':
+      return 'text-gray-400'; // Independent
+    // Add more parties and colors as needed
+    default:
+      return 'text-teal-300'; // Default fallback color
+  }
+};
 
 // MessageBubble component
 interface MessageBubbleProps {
@@ -80,7 +111,7 @@ const MessageBubble = ({ speech, onClick, isSelected, originalDebate }: MessageB
                 </div>
             )}
             <div className={`${baseClasses} ${colors}`}>
-                <p className="font-semibold text-sm mb-1 text-teal-300">{speech.speaker || 'Unknown Speaker'}</p>
+                <p className={`font-semibold text-sm mb-1 ${getPartyColorClassFromName(speech.speaker)}`}>{speech.speaker || 'Unknown Speaker'}</p>
                 <p className="text-sm whitespace-pre-wrap">{speech.text}</p>
             </div>
         </div>
