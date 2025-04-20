@@ -15,10 +15,9 @@ interface ChatListProps {
   selectedDebateId: string | null;
   allMetadata: Record<string, DebateMetadata>;
   fetchMetadata: (id: string) => void; // Renamed from onItemVisible for clarity
-  onDeleteDebate: (id: string) => void; // Add the new prop
 }
 
-export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata, fetchMetadata, onDeleteDebate }: ChatListProps) {
+export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata, fetchMetadata }: ChatListProps) {
   const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true); // Initially true until first load attempt
