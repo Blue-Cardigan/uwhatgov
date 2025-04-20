@@ -138,6 +138,34 @@ const ChatView = forwardRef(({
     scrollToItem: (index: number) => {
       const element = itemRefs.current.get(index);
       element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+    // Expose function to trigger stream regeneration
+    triggerStream: () => {
+        if (!debateIdRef.current) {
+            console.warn('[ChatView triggerStream] No debate ID set.');
+            return;
+        }
+        console.log(`[ChatView triggerStream] Triggering stream regeneration for ${debateIdRef.current}`);
+        // Reset relevant state before starting new stream
+        eventSourceRef.current?.close(); // Close existing connection if any
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current); // Clear pending retries
+        if (speechDisplayTimeoutRef.current) clearTimeout(speechDisplayTimeoutRef.current); // Clear pending speech display
+        setRewrittenDebate(prev => prev ? { ...prev, speeches: [] } : null); // Clear speeches but keep title if already loaded
+        speechesRef.current = [];
+        jsonBufferRef.current = '';
+        pendingSpeechesQueueRef.current = [];
+        isProcessingQueueRef.current = false;
+        persistAttemptedRef.current = false;
+        setTypingSpeakerInfo(null);
+        setIsReconnecting(false);
+        setRetryAttempt(0);
+
+        // Indicate loading/streaming state
+        setIsLoadingRewritten(false); // Not technically loading from cache anymore
+        setIsStreaming(true);
+
+        // Connect the event source
+        connectEventSource(0);
     }
   }));
 

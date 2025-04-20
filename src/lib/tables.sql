@@ -27,6 +27,7 @@ $$ language 'plpgsql';
 CREATE TABLE casual_debates_uwhatgov (
     id UUID PRIMARY KEY, -- Removed foreign key reference
     content TEXT,
+    summary TEXT, -- Added column for storing the debate summary
     status TEXT NOT NULL DEFAULT 'success', -- e.g., pending, generating, completed, failed
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     last_updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,

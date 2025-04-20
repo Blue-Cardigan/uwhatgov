@@ -15,6 +15,12 @@ import { InternalDebateSummary, DebateMetadata } from '@/types';
 import { DebateResponse } from '@/lib/hansard/types'; // Import necessary types
 import { Speech } from '@/components/ChatView'; // Import Speech type
 
+// Define type for the ChatView ref methods
+interface ChatViewHandle {
+  scrollToItem: (index: number) => void;
+  triggerStream: () => void;
+}
+
 // Icons for view toggle
 const CasualIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M10 2a.75.75 0 0 1 .75.75v.212c.43-.09 1.126-.162 2.008-.162 2.441 0 4.567 1.06 5.871 2.631l.124.152.162.068a.75.75 0 0 1 .64.919l-1.582 6.01a6.012 6.012 0 0 1-5.108 4.394c-.64.13-1.43.203-2.316.203-.885 0-1.676-.073-2.316-.203a6.012 6.012 0 0 1-5.108-4.394l-1.582-6.01a.75.75 0 0 1 .64-.919l.162-.068.124-.152C2.676 3.86 4.8 2.8 7.242 2.8c.882 0 1.578.073 2.008.162V2.75A.75.75 0 0 1 10 2Z" clipRule="evenodd" /></svg>;
 const OriginalIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M4.25 5.5a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" clipRule="evenodd" /></svg>;
@@ -26,7 +32,7 @@ const ORIGINAL_DEBATE_CACHE_PREFIX = 'uwhatgov_original_';
 export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const chatViewRef = useRef<{ scrollToItem: (index: number) => void }>(null); // Ref for ChatView scrolling
+  const chatViewRef = useRef<ChatViewHandle>(null); // Ref for ChatView scrolling and triggering
 
   // Caches stored in refs/state
   // Metadata cache uses state to trigger re-renders when items are added/updated for ChatList
@@ -59,9 +65,17 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<number[]>([]); // Stores indices (OrderInSection) of matches
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1); // Index within searchResults array
+  // State for regeneration loading
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Ref for the rewritten debate data used in search
   const rewrittenDebateRef = useRef<Speech[] | null>(null);
+
+  // Summary State
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [errorSummary, setErrorSummary] = useState<string | null>(null);
 
   // Fetch Original Debate Data (incorporates memory & localStorage caching)
   const fetchOriginalDebate = useCallback(async (debateId: string | null) => {
@@ -212,6 +226,30 @@ export default function Home() {
     // we might need to use a ref inside the callback or pass the setter.
   }, [metadataCache]);
 
+  // Fetch Summary Data
+  const fetchSummary = useCallback(async (debateId: string | null) => {
+      if (!debateId) return;
+      console.log(`[fetchSummary] Fetching summary for ${debateId}`);
+      setIsLoadingSummary(true);
+      setErrorSummary(null);
+      setSummaryText(null); // Clear previous summary
+
+      try {
+          const response = await fetch(`/api/hansard/debates/summarize/${debateId}`);
+          const data = await response.json();
+          if (!response.ok) {
+              throw new Error(data.error || `Failed to fetch summary: ${response.status}`);
+          }
+          setSummaryText(data.summary || 'No summary available.');
+      } catch (e: any) {
+          console.error(`[fetchSummary] Failed fetch summary ${debateId}:`, e);
+          setErrorSummary(`Failed to load summary: ${e.message}`);
+          setSummaryText(null);
+      } finally {
+          setIsLoadingSummary(false);
+      }
+  }, []); // No dependencies needed as it only uses debateId arg
+
   // Callback for ChatList items becoming visible
   const handleChatItemVisible = useCallback((debateId: string) => {
       // console.log(`[handleChatItemVisible] Item visible: ${debateId}`);
@@ -254,12 +292,16 @@ export default function Home() {
              setViewMode('rewritten');
              setSearchQuery('');
              setIsSearchOpen(false);
+             setSummaryText(null); // Clear summary
+             setIsLoadingSummary(false);
+             setErrorSummary(null);
         }
         // Always fetch data if a valid ID is present in the URL
         // Fetch functions have internal checks to prevent redundant calls if data exists
         console.log(`[useEffect] Ensuring data for ID: ${debateIdFromUrl} (will use cache if available)`);
         fetchOriginalDebate(debateIdFromUrl);
         fetchSelectedDebateMetadata(debateIdFromUrl);
+        fetchSummary(debateIdFromUrl); // Fetch summary when ID changes
 
     } else {
         // No debateId in URL, ensure everything is cleared
@@ -276,12 +318,15 @@ export default function Home() {
             setErrorMetadata(null);
             setViewMode('rewritten');
             setSearchQuery('');
-             setIsSearchOpen(false);
+            setIsSearchOpen(false);
+            setSummaryText(null); // Clear summary
+            setIsLoadingSummary(false);
+            setErrorSummary(null);
         }
     }
     // Dependencies: Run when URL changes or the selected ID state changes.
     // fetchOriginalDebate and fetchSelectedDebateMetadata are stable due to useCallback.
-  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, metadataCache]);
+  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, fetchSummary, metadataCache]);
 
   // Fetch Original Debate Data
   const fetchOriginalDebateData = useCallback(async (debateId: string | null) => {
@@ -415,6 +460,48 @@ export default function Home() {
       setViewMode(nextMode);
   }, [viewMode, selectedDebateId, originalDebate, isLoadingOriginal, fetchOriginalDebate]);
 
+  // Handle Regenerate Button Click
+  const handleRegenerate = useCallback(async () => {
+      if (!selectedDebateId) return;
+
+      // Optional: Confirmation dialog
+      if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) {
+          return;
+      }
+
+      console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
+      setIsRegenerating(true);
+
+      try {
+          // 1. Call the delete API route
+          const response = await fetch(`/api/hansard/debates/rewrite/delete/${selectedDebateId}`, {
+              method: 'DELETE',
+          });
+
+          if (!response.ok) {
+              // Try to get error message from response body
+              let errorMsg = `Failed to delete existing entry: ${response.status}`;
+              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {}
+              throw new Error(errorMsg);
+          }
+
+          console.log(`[handleRegenerate] Existing entry deleted (or didn't exist) for ${selectedDebateId}. Triggering stream.`);
+
+          // 2. Trigger the stream reset in ChatView
+          chatViewRef.current?.triggerStream();
+          fetchSummary(selectedDebateId); // Also trigger summary fetch on regenerate
+
+          // Optional: Display a success message or rely on ChatView's loading state
+
+      } catch (error: any) {
+          console.error(`[handleRegenerate] Error during regeneration for ${selectedDebateId}:`, error);
+          // Display error to user (e.g., using a toast notification library)
+          alert(`Regeneration failed: ${error.message}`); // Simple alert for now
+      } finally {
+          setIsRegenerating(false);
+      }
+  }, [selectedDebateId, chatViewRef, fetchSummary]); // Added fetchSummary dependency
+
   // Calculate the selected original item based on state here
   const selectedOriginalItem = (selectedOriginalIndex !== null && originalDebate?.Items)
       ? originalDebate.Items.find(item => item.OrderInSection === selectedOriginalIndex)
@@ -541,24 +628,71 @@ export default function Home() {
                      {/* Search Icon */}
                      <button
                        onClick={() => setIsSearchOpen(true)}
-                       className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                       className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                        title="Search debate"
-                       disabled={!selectedDebateId}
+                       disabled={!selectedDebateId || isRegenerating}
                      >
                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
                      </button>
 
-                     {/* More Options Icon
-                     <button className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200" title="More options">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M10 3.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10 8.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10 13.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z" /></svg>
-                     </button> */}
+                     {/* Regenerate Button (Only in rewritten view) */} 
+                     {viewMode === 'rewritten' && (
+                         <button
+                             onClick={handleRegenerate}
+                             className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isRegenerating ? 'animate-spin' : ''}`}
+                             title="Regenerate Casual Version"
+                             disabled={!selectedDebateId || isRegenerating}
+                         >
+                             {/* Simple Refresh Icon */} 
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                 <path fillRule="evenodd" d="M20.944 12.979c-.489 4.509-4.306 8.021-8.944 8.021-2.698 0-5.112-1.194-6.763-3.075l1.245-1.633C7.787 17.969 9.695 19 11.836 19c3.837 0 7.028-2.82 7.603-6.5h-2.125l3.186-4.5 3.186 4.5h-2.742zM12 5c2.2 0 4.157.996 5.445 2.553l-1.31 1.548C14.98 7.725 13.556 7 12 7c-3.837 0-7.028 2.82-7.603 6.5h2.125l-3.186 4.5L.15 13.5h2.742C3.38 8.991 7.196 5 12 5z" clipRule="evenodd" />
+                             </svg>
+                          </button>
+                     )}
+
+                     {/* Summary Toggle Button */} 
+                     <button
+                         onClick={() => setIsSummaryOpen(prev => !prev)} // Toggle dropdown
+                         className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isSummaryOpen ? 'bg-gray-700 text-white' : ''}`}
+                         title={isSummaryOpen ? "Hide Summary" : "Show Summary"}
+                         disabled={!selectedDebateId || isRegenerating}
+                     >
+                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                             <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A.75.75 0 0 0 10 14.25a.75.75 0 0 0 .75-.75v-.654a.25.25 0 0 1 .244-.304l.459-2.066A.75.75 0 0 0 10.253 9H9Z" clipRule="evenodd" />
+                         </svg>
+                     </button>
+
                    </div>
                  </>
                )}
             </header>
 
+            {/* Summary Dropdown Panel - Positioned absolutely BELOW the header */}
+            {isSummaryOpen && (
+                <div className="absolute top-16 left-0 right-0 z-30 bg-[#111b21] border-b border-gray-700 shadow-lg p-4 text-sm max-h-48 overflow-y-auto">
+                     {/* Close button for the dropdown */}
+                     <button
+                        onClick={() => setIsSummaryOpen(false)}
+                        className="absolute top-1 right-1 text-gray-500 hover:text-white p-1 rounded-full bg-gray-800 hover:bg-gray-700 text-xs z-40"
+                        title="Close summary"
+                     >
+                        ✕
+                     </button>
+                     {isLoadingSummary ? (
+                         <span className="italic text-gray-400 animate-pulse">Generating summary...</span>
+                     ) : errorSummary ? (
+                         <span className="text-red-400 italic">Error: {errorSummary}</span>
+                     ) : summaryText ? (
+                         <p className="text-gray-300 pr-4">{summaryText}</p> 
+                     ) : (
+                         <span className="italic text-gray-500">No summary available or not generated yet.</span>
+                     )}
+                </div>
+            )}
+
             {/* ChatView Wrapper (handles scrolling) */}
-            <div className="flex-1 overflow-y-auto">
+            {/* Added conditional padding top ONLY if summary dropdown is open */}
+            <div className={`flex-1 overflow-y-auto ${isSummaryOpen ? 'pt-2' : ''}`}>
               <ChatView
                 ref={chatViewRef} // Assign ref
                 debateId={selectedDebateId}
@@ -620,9 +754,9 @@ export default function Home() {
             )}
 
             {/* Footer */}
-            <footer className="p-3 border-t border-gray-700 bg-[#202c33] flex items-center gap-3 flex-shrink-0 z-10">
-              <input type="text" placeholder="Type a message (read-only view)" className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none" disabled />
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-gray-400 cursor-pointer hover:text-gray-200"><path d="M8.25 4.5a3.75 3.75 0 1 1 7.5 0v8.25a3.75 3.75 0 1 1-7.5 0V4.5Z" /><path d="M6 10.5a.75.75 0 0 1 .75.75v1.5a5.25 5.25 0 1 0 10.5 0v-1.5a.75.75 0 0 1 1.5 0v1.5a6.751 6.751 0 0 1-6 6.709v2.041h3a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1 0-1.5h3v-2.041a6.751 6.751 0 0 1-6-6.709v-1.5A.75.75 0 0 1 6 10.5Z" /></svg>
+            <footer className="p-3 border-t border-gray-700 bg-[#202c33] flex items-center gap-3 flex-shrink-0 z-10 h-16">
+              {/* Simplified footer - Summary is now in the header dropdown */}
+              <input type="text" placeholder="uwhatgov" className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none" disabled />
             </footer>
 
           </>

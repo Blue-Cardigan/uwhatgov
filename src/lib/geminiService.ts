@@ -129,3 +129,93 @@ import {
       throw new Error(`Gemini API Error: ${error.message || 'Unknown error'}`);
     }
   }
+
+  // --- Configuration for Plain Text Generation (Summary) ---
+  const textGenerationConfig = {
+      temperature: 0.6, // Slightly lower temp for more focused summary
+      topK: 1,
+      topP: 1,
+      maxOutputTokens: 1024, // Limit summary length
+      responseMimeType: "text/plain", // Expecting plain text
+  }; 
+  
+  // --- Safety Settings (Reuse from above) ---
+  const safetySettings = [
+      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  ];
+  
+  /**
+   * Takes debate transcript text and generates a concise summary.
+   *
+   * @param {string} relevantDebateText - The text of the debate to summarize.
+   * @param {string} debateTitle - The title of the debate.
+   * @returns {Promise<string>} A promise resolving to the generated summary text.
+   * @throws {Error} If the Gemini API call fails or returns an unexpected response.
+   */
+  export async function generateDebateSummary(
+      relevantDebateText: string,
+      debateTitle: string
+  ): Promise<string> {
+  
+    if (!model) {
+        console.error("Gemini model not initialized (API key missing?).");
+        throw new Error("Gemini model not available.");
+    }
+    if (!relevantDebateText) {
+      console.warn("Cannot generate summary for empty text.");
+      return ""; // Return empty string for empty input
+    }
+  
+    // Prompt for summarization
+    const prompt = `
+You are an AI assistant tasked with summarizing a parliamentary debate transcript.
+
+**Task:** Generate a concise, neutral summary (around 2-3 sentences) of the key points discussed in the following debate transcript.
+Focus on the main arguments or topics raised.
+
+**Debate Title:** ${debateTitle || 'Untitled Debate'}
+
+**Debate Transcript:**
+--- START TRANSCRIPT ---
+${relevantDebateText}
+--- END TRANSCRIPT ---
+
+**Concise Summary (2-3 sentences):**
+`;
+  
+    console.log(`[Gemini Service] Requesting summary for debate "${debateTitle}"`);
+  
+    try {
+      const result = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: textGenerationConfig,
+          safetySettings: safetySettings
+      });
+  
+      const response = result.response;
+      const summaryText = response.text().trim();
+  
+      if (!summaryText) {
+           console.warn(`[Gemini Service] Summary generation returned empty text for "${debateTitle}".`);
+           // Fallback or throw? Let's return a placeholder for now.
+           return "Summary could not be generated.";
+      }
+  
+      console.log(`[Gemini Service] Summary generated for debate "${debateTitle}".`);
+      return summaryText;
+  
+    } catch (error: any) {
+      console.error(`[Gemini Service] Error generating summary for debate "${debateTitle}":`, error);
+  
+       // Check for safety blocks specifically
+       if (error.response && error.response.promptFeedback?.blockReason) {
+           console.warn(`[Gemini Service] Summary generation blocked due to safety settings: ${error.response.promptFeedback.blockReason}`);
+           return `Summary generation blocked due to safety settings (${error.response.promptFeedback.blockReason}).`;
+       }
+      // Rethrow or handle more gracefully depending on desired caller behavior
+      throw new Error(`Gemini API Error during summary generation: ${error.message || 'Unknown error'}`);
+    }
+  }
