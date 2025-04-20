@@ -15,6 +15,10 @@ import { InternalDebateSummary, DebateMetadata } from '@/types';
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types'; // Import necessary types
 import { Speech } from '@/components/ChatView'; // Import Speech type
 
+// Icons for view toggle
+const CasualIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M10 2a.75.75 0 0 1 .75.75v.212c.43-.09 1.126-.162 2.008-.162 2.441 0 4.567 1.06 5.871 2.631l.124.152.162.068a.75.75 0 0 1 .64.919l-1.582 6.01a6.012 6.012 0 0 1-5.108 4.394c-.64.13-1.43.203-2.316.203-.885 0-1.676-.073-2.316-.203a6.012 6.012 0 0 1-5.108-4.394l-1.582-6.01a.75.75 0 0 1 .64-.919l.162-.068.124-.152C2.676 3.86 4.8 2.8 7.242 2.8c.882 0 1.578.073 2.008.162V2.75A.75.75 0 0 1 10 2Z" clipRule="evenodd" /></svg>;
+const OriginalIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M4.25 5.5a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" clipRule="evenodd" /></svg>;
+
 export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -42,6 +46,7 @@ export default function Home() {
   const [originalPanelHeight, setOriginalPanelHeight] = useState(192); // Moved from ChatView, default height (12rem)
 
   // Search State
+  const [isSearchOpen, setIsSearchOpen] = useState(false); // State for search input visibility
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<number[]>([]); // Stores indices (OrderInSection) of matches
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1); // Index within searchResults array
@@ -97,38 +102,58 @@ export default function Home() {
       }
   }, []);
 
-  // Effect to sync selectedDebateId from URL and fetch data
+  // Effect to sync selectedDebateId from URL, reset state, and fetch data
   useEffect(() => {
     const debateIdFromUrl = searchParams.get('debateId');
+
     if (debateIdFromUrl) {
+        // Check if the ID from URL is different from the current state
         if (debateIdFromUrl !== selectedDebateId) {
-             console.log(`Setting selectedDebateId from URL: ${debateIdFromUrl}`);
+             console.log(`[useEffect] Detected ID change: ${selectedDebateId} -> ${debateIdFromUrl}`);
+             // Set the new ID
              setSelectedDebateId(debateIdFromUrl);
-             // Reset relevant states when ID changes fundamentally
+
+             // Reset ALL other relevant states immediately
+             setSelectedDebateSummary(null); // Will be updated by ChatList or fetched if needed
              setOriginalDebate(null);
              setIsLoadingOriginal(false);
              setErrorOriginal(null);
              setSelectedOriginalIndex(null);
-             setSelectedDebateMetadata(null); // Clear metadata too
+             setSelectedDebateMetadata(null);
              setIsLoadingMetadata(false);
              setErrorMetadata(null);
-             // Trigger fetches for the new ID
-             fetchOriginalDebate(debateIdFromUrl);
-             fetchSelectedDebateMetadata(debateIdFromUrl);
+             setViewMode('rewritten');
+             setSearchQuery('');
+             setIsSearchOpen(false);
+             // Don't fetch here, fetch below *after* state is potentially set
         }
+        // Always fetch data if a valid ID is present in the URL
+        // Fetch functions have internal checks to prevent redundant calls if data exists
+        console.log(`[useEffect] Triggering fetches for ID: ${debateIdFromUrl}`);
+        fetchOriginalDebate(debateIdFromUrl);
+        fetchSelectedDebateMetadata(debateIdFromUrl);
+
     } else {
-        // Clear state if no debateId in URL
-        setSelectedDebateId(null);
-        setSelectedDebateSummary(null);
-        setOriginalDebate(null);
-        setErrorOriginal(null);
-        setSelectedOriginalIndex(null);
-        setSelectedDebateMetadata(null);
-        setErrorMetadata(null);
+        // No debateId in URL, ensure everything is cleared
+        if (selectedDebateId !== null) {
+            console.log('[useEffect] Clearing selected debate state.');
+            setSelectedDebateId(null);
+            setSelectedDebateSummary(null);
+            setOriginalDebate(null);
+            setIsLoadingOriginal(false);
+            setErrorOriginal(null);
+            setSelectedOriginalIndex(null);
+            setSelectedDebateMetadata(null);
+            setIsLoadingMetadata(false);
+            setErrorMetadata(null);
+            setViewMode('rewritten');
+            setSearchQuery('');
+             setIsSearchOpen(false);
+        }
     }
-    // Only run when searchParams changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, fetchOriginalDebate, fetchSelectedDebateMetadata]); // Add fetch functions as dependencies
+    // Dependencies: Run when URL changes or the selected ID state changes.
+    // fetchOriginalDebate and fetchSelectedDebateMetadata are stable due to useCallback.
+  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata]);
 
   // Fetch Original Debate Data
   const fetchOriginalDebateData = useCallback(async (debateId: string | null) => {
@@ -228,17 +253,12 @@ export default function Home() {
 
   // --- END SEARCH LOGIC ---
 
-  // Handle selecting a debate from the list
+  // Handle selecting a debate from the list - ONLY updates URL
   const handleSelectDebate = useCallback((debate: InternalDebateSummary) => {
-    console.log(`Debate selected: ${debate.id} - Title: ${debate.title}`);
-    setSelectedDebateId(debate.id);
-    setSelectedDebateSummary(debate);
-    setOriginalDebate(null);
-    setErrorOriginal(null);
-    setIsLoadingOriginal(false);
-    setSelectedOriginalIndex(null); // Close panel when changing debate
-    setViewMode('rewritten'); // Reset view mode
-
+    console.log(`[handleSelectDebate] Routing to debate: ${debate.id}`);
+    // We only need to update the URL. The useEffect above will handle state changes.
+    // Optionally update summary immediately for faster title update, but useEffect handles resets.
+    // setSelectedDebateSummary(debate); // Keep or remove based on desired UX for title update speed
     router.push(`/?debateId=${debate.id}`, { scroll: false });
   }, [router]);
 
@@ -258,13 +278,14 @@ export default function Home() {
   }, [originalDebate, isLoadingOriginal, selectedDebateId, fetchOriginalDebate]);
 
 
-  // Handler for toggling the view mode
-  const handleToggle = useCallback((mode: 'rewritten' | 'original') => {
-      if (mode === 'original' && selectedDebateId && !originalDebate && !isLoadingOriginal) {
+  // Handler for toggling the view mode - Now switches between the two modes
+  const handleToggleViewMode = useCallback(() => {
+      const nextMode = viewMode === 'rewritten' ? 'original' : 'rewritten';
+      if (nextMode === 'original' && selectedDebateId && !originalDebate && !isLoadingOriginal) {
           fetchOriginalDebate(selectedDebateId);
       }
-      setViewMode(mode);
-  }, [selectedDebateId, originalDebate, isLoadingOriginal, fetchOriginalDebate]);
+      setViewMode(nextMode);
+  }, [viewMode, selectedDebateId, originalDebate, isLoadingOriginal, fetchOriginalDebate]);
 
   // Calculate the selected original item based on state here
   const selectedOriginalItem = (selectedOriginalIndex !== null && originalDebate?.Items)
@@ -276,56 +297,50 @@ export default function Home() {
 
   return (
     <main className="flex h-screen w-screen bg-[#111b21] text-white overflow-hidden relative">
-      {/* Sidebar */}
-      <div className="w-full md:w-2/5 lg:w-1/4 border-r border-gray-700 flex flex-col bg-[#111b21]">
+      {/* Sidebar - Hidden on mobile if a chat is selected */}
+      <div
+        className={`
+          ${selectedDebateId ? 'hidden md:flex' : 'flex'}
+          w-full md:w-2/5 border-r border-gray-700 flex-col bg-[#111b21]
+        `}
+      >
         <ChatList
           onSelectDebate={handleSelectDebate}
           selectedDebateId={selectedDebateId}
         />
       </div>
 
-      {/* Main Chat View Area (takes remaining space, relative positioning for overlay) */}
-      <div className="flex-grow flex flex-col bg-[#0b141a] overflow-hidden relative" style={{backgroundImage: "url('/whatsapp-bg.png')", backgroundSize: 'contain', backgroundPosition: 'center'}}>
+      {/* Main Chat View Area - Hidden on mobile if NO chat is selected */}
+      <div
+        className={`
+          ${selectedDebateId ? 'flex' : 'hidden md:flex'}
+          flex-grow flex-col bg-[#0b141a] overflow-hidden relative
+        `}
+        style={{backgroundImage: "url('/whatsapp-bg.png')", backgroundSize: 'contain', backgroundPosition: 'center'}}
+      >
         {selectedDebateId ? (
           <>
             {/* Header */}
-            <header className="p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10">
-               {/* Left Side */}
-               <div className="flex items-center gap-3 min-w-0"> {/* Added min-w-0 for better truncation */}
-                 {/* Replace placeholder div with DebateMetadataIcon */}
-                 <DebateMetadataIcon
-                   metadata={{ // Construct the object needed by the icon
-                     ...selectedDebateMetadata,
-                     isLoading: isLoadingMetadata,
-                     error: errorMetadata
-                   }}
-                   size={40} // Standard avatar size
-                 />
-                 <div className="flex flex-col min-w-0"> {/* Added min-w-0 */}
-                   <h2 className="text-md font-semibold text-gray-100 truncate" title={selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}>
-                     {selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}
-                   </h2>
-                   <span className="text-xs text-gray-400">
-                     {selectedDebateSummary?.house || originalDebate?.Overview?.House || '...'}
-                   </span>
-                 </div>
-               </div>
-               {/* Center Toggle */}
-               <div className="flex items-center space-x-1 p-1 bg-[#111b21] rounded-lg flex-shrink-0 mx-4">
-                    <button onClick={() => handleToggle('rewritten')} className={`px-3 py-1 rounded-md text-xs sm:text-sm transition-colors ${viewMode === 'rewritten' ? 'bg-teal-600 text-white' : 'bg-transparent text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`} disabled={!selectedDebateId}>Casual</button>
-                    <button onClick={() => handleToggle('original')} className={`px-3 py-1 rounded-md text-xs sm:text-sm transition-colors ${viewMode === 'original' ? 'bg-teal-600 text-white' : 'bg-transparent text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`} disabled={!selectedDebateId}>Original</button>
-               </div>
-               {/* Right Icons & Search */}
-               <div className="flex items-center gap-2 text-gray-400 flex-shrink-0">
-                 {/* Search Input and Controls */}
-                 <div className="flex items-center bg-[#2a3942] rounded-md px-2 py-1">
-                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500 mr-1 flex-shrink-0"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
+            <header className="p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10 h-16">
+               {/* Search Open State */}
+               {isSearchOpen ? (
+                 <div className="flex items-center w-full">
+                   <button
+                     onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
+                     className="p-1 text-gray-400 hover:text-white mr-2"
+                     aria-label="Close search"
+                   >
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                       <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
+                     </svg>
+                   </button>
                    <input
                      type="text"
                      placeholder="Search debate..."
                      value={searchQuery}
                      onChange={handleSearchChange}
-                     className="bg-transparent text-sm text-gray-200 placeholder-gray-500 focus:outline-none w-24 sm:w-32 md:w-40"
+                     className="flex-grow bg-transparent text-sm text-gray-200 placeholder-gray-500 focus:outline-none px-2 py-1"
+                     autoFocus // Focus the input when it opens
                      disabled={!selectedDebateId}
                    />
                    {searchQuery && (
@@ -343,9 +358,72 @@ export default function Home() {
                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" /></svg> {/* Down Arrow */}
                    </button>
                  </div>
-                 {/* Existing More Options Icon */}
-                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 cursor-pointer hover:text-gray-200"><path fillRule="evenodd" d="M10.5 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm0 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm0 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Z" clipRule="evenodd" /></svg>
-               </div>
+               ) : (
+                 /* Default Header View */
+                 <>
+                   {/* Left Side */}
+                   <div className="flex items-center gap-3 min-w-0 flex-1"> {/* Added flex-1 */}
+                     {/* Back Button (Mobile Only) */}
+                     <button
+                        onClick={() => router.push('/', { scroll: false })} // Use router to clear query param and trigger state reset
+                        className="md:hidden mr-1 p-1 text-gray-400 hover:text-white"
+                        aria-label="Back to chat list"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                          <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
+                        </svg>
+                     </button>
+                     {/* DebateMetadataIcon */}
+                     <DebateMetadataIcon
+                       metadata={{ // Construct the object needed by the icon
+                         ...selectedDebateMetadata,
+                         isLoading: isLoadingMetadata,
+                         error: errorMetadata
+                       }}
+                       size={40} // Standard avatar size
+                     />
+                     <div className="flex flex-col min-w-0"> {/* Added min-w-0 */}
+                       <h2 className="text-md font-semibold text-gray-100 truncate" title={selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}>
+                         {selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}
+                       </h2>
+                       <span className="text-xs text-gray-400">
+                         {selectedDebateSummary?.house || originalDebate?.Overview?.House || '...'}
+                       </span>
+                     </div>
+                   </div>
+
+                   {/* Right Icons */}
+                   <div className="flex items-center gap-1 md:gap-2 text-gray-400 flex-shrink-0">
+                     {/* View Mode Toggle Button */}
+                     <button
+                       onClick={handleToggleViewMode}
+                       className={`flex items-center gap-1 p-1 sm:p-2 rounded-md text-xs sm:text-sm transition-colors ${viewMode === 'rewritten' ? 'bg-teal-600 text-white hover:bg-teal-700' : 'bg-[#111b21] text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}
+                       disabled={!selectedDebateId}
+                       title={`Switch to ${viewMode === 'rewritten' ? 'Original' : 'Casual'} view`}
+                     >
+                       {viewMode === 'rewritten' ? <CasualIcon /> : <OriginalIcon />}
+                       <span className="hidden sm:inline">
+                           {viewMode === 'rewritten' ? 'Casual' : 'Original'}
+                       </span>
+                     </button>
+
+                     {/* Search Icon */}
+                     <button
+                       onClick={() => setIsSearchOpen(true)}
+                       className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                       title="Search debate"
+                       disabled={!selectedDebateId}
+                     >
+                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
+                     </button>
+
+                     {/* More Options Icon
+                     <button className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200" title="More options">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M10 3.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10 8.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10 13.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z" /></svg>
+                     </button> */}
+                   </div>
+                 </>
+               )}
             </header>
 
             {/* ChatView Wrapper (handles scrolling) */}
@@ -418,7 +496,7 @@ export default function Home() {
 
           </>
         ) : (
-          // Placeholder when no debate is selected
+          // Placeholder when no debate is selected - This div will be hidden on mobile by parent logic
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
             <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-20 h-20 text-gray-500 mx-auto opacity-50"><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75h-7.5"/></svg>
