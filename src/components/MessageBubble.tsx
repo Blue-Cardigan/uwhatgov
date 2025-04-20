@@ -4,7 +4,7 @@ import { DebateResponse } from "@/lib/hansard/types";
 import { Speech, ReactionSummary } from "./ChatView";
 import { getPartyColorClass } from "@/lib/partyColors";
 import { ReactionBar } from './ReactionBar'; // Import ReactionBar
-import { SignInPromptPopover } from './SignInPromptPopover'; // Import the new popover
+import Link from "next/link";
 
 // MessageBubble component
 interface MessageBubbleProps {
@@ -76,9 +76,10 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
     const [errorInfo, setErrorInfo] = useState<string | null>(null);
     const fetchAbortControllerRef = useRef<AbortController | null>(null);
     const infoboxRef = useRef<HTMLDivElement>(null); // Ref for the infobox itself
+    const bubbleRef = useRef<HTMLDivElement>(null); // Ref for the main bubble div
+    const reactionContainerRef = useRef<HTMLDivElement>(null); // NEW: Ref for the reaction bar container
     // --- Popover State ---
-    const [isSignInPopoverVisible, setIsSignInPopoverVisible] = useState(false);
-    const bubbleRef = useRef<HTMLDivElement>(null); // Ref for the main bubble div to position popover
+    const [isSignUpPopoverVisible, setisSignUpPopoverVisible] = useState(false);
     // --- --- ---
 
     const baseClasses = "rounded-lg px-3 py-2 max-w-xs sm:max-w-sm md:max-w-md shadow-md cursor-pointer transition-colors duration-200 ease-in-out relative";
@@ -165,22 +166,16 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
 
     // --- Bubble Click Handler ---
     const handleBubbleClick = () => {
-        if (!userId) {
-            // Unauthenticated user: toggle sign-in popover
-            setIsSignInPopoverVisible(prev => !prev);
-        } else {
-            // Authenticated user: call original onClick (select message)
-            onClick();
-        }
+        // Always call onClick to select the message and show the original panel
+        onClick();
     };
     // --- --- ---
 
-    // --- Simple Reaction Display (for unauthenticated users) ---
+    // --- Simple Reaction Display (for unauthenticated users) --- RE-ADDED
     const SimpleReactionDisplay = () => {
-        if (!reactions || reactions.length === 0) return null;
-
+        // Filter reactions to only show those with count > 0
         const visibleReactions = reactions.filter(r => r.count > 0);
-        if (visibleReactions.length === 0) return null;
+        if (visibleReactions.length === 0) return null; // Don't render if no reactions have counts > 0
 
         return (
             <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
@@ -262,33 +257,55 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
             </div>
 
             {/* --- Conditional Reaction Display --- */}
-            {userId ? (
-                // Authenticated: Show interactive ReactionBar if selected or has reactions
-                (isSelected || reactions.length > 0) && speech.originalIndex !== undefined && debateId && (
-                    <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
-                        <div className="max-w-xs sm:max-w-sm md:max-w-md">
-                            <ReactionBar
-                                debateId={debateId}
-                                speechOriginalIndex={speech.originalIndex}
-                                reactions={reactions}
-                                userId={userId}
-                            />
-                        </div>
-                    </div>
-                )
-            ) : (
-                 // Unauthenticated: Show simple display if reactions exist
-                 reactions.length > 0 && speech.originalIndex !== undefined && debateId && <SimpleReactionDisplay />
-            )}
-            {/* --- --- --- */}
-
-            {/* --- Sign In Popover (for unauthenticated users) --- */}
-            {!userId && (
-                <SignInPromptPopover
-                    isVisible={isSignInPopoverVisible}
-                    onClose={() => setIsSignInPopoverVisible(false)}
-                    targetRef={bubbleRef} // Position relative to the bubble
-                />
+            {/* Logic: Authenticated users see ReactionBar if selected OR has reactions. */}
+            {/* Unauthenticated users see disabled ReactionBar ONLY if selected, */}
+            {/* otherwise see SimpleReactionDisplay if it has reactions */}
+            {speech.originalIndex !== undefined && debateId && (
+                <>
+                    {userId ? (
+                        // Authenticated User
+                        (isSelected || reactions.length > 0) && (
+                            <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
+                                <div className="max-w-xs sm:max-w-sm md:max-w-md">
+                                    <ReactionBar
+                                        debateId={debateId}
+                                        speechOriginalIndex={speech.originalIndex}
+                                        reactions={reactions}
+                                        userId={userId}
+                                    />
+                                </div>
+                            </div>
+                        )
+                    ) : (
+                        // Unauthenticated User
+                        isSelected ? (
+                            // Show disabled ReactionBar when selected
+                            <div
+                                ref={reactionContainerRef} // Attach the new ref here
+                                className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1 relative`}
+                            >
+                                <div className="max-w-xs sm:max-w-sm md:max-w-md">
+                                    <ReactionBar
+                                        debateId={debateId}
+                                        speechOriginalIndex={speech.originalIndex}
+                                        reactions={reactions}
+                                        userId={null} // Pass null to disable
+                                        onMouseEnter={() => setisSignUpPopoverVisible(true)}
+                                        onMouseLeave={() => setisSignUpPopoverVisible(false)}
+                                    />
+                                </div>
+                                {isSignUpPopoverVisible && (
+                                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-max p-2 bg-[#2a3942] text-gray-200 text-xs border border-gray-600 rounded-md shadow-lg z-50">
+                                        Sign Up&nbsp;to react to this message.
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            // Show SimpleReactionDisplay when not selected but has reactions
+                            reactions.length > 0 && <SimpleReactionDisplay />
+                        )
+                    )}
+                </>
             )}
             {/* --- --- --- */}
         </div>

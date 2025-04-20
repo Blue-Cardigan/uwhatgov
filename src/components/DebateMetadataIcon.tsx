@@ -29,7 +29,7 @@ const DebateMetadataIcon: React.FC<DebateMetadataIconProps> = ({ metadata, size 
     return <div style={{ width: size, height: size }} className="flex-shrink-0 w-10 h-10 bg-gray-600 rounded-full"></div>;
   }
 
-  const { partyRatios, speakerCount } = metadata;
+  const { partyRatios, speakerCount, contributionCount } = metadata;
   const ratios = Object.entries(partyRatios)
     .filter(([, ratio]) => ratio > 0) // Filter out zero ratios
     .sort(([, ratioA], [, ratioB]) => ratioB - ratioA); // Optional: Sort by ratio desc
@@ -66,31 +66,39 @@ const DebateMetadataIcon: React.FC<DebateMetadataIconProps> = ({ metadata, size 
     );
   });
 
-  // Handle case where there are ratios but they sum to 0 (shouldn't happen with filter)
-    // or if ratios array is empty after filtering
+  // Handle case where there are ratios but they sum to 0 or ratios array is empty
   if (paths.length === 0 && speakerCount >= 0) {
-     // Draw a default background circle if no parties have ratios > 0
      paths.push(<circle key="default-bg" cx={radius} cy={radius} r={radius} fill={getPartySvgFill(null)} />);
   }
 
+  const badgeSize = radius; // Size of the badge circle
+  const badgeFontSize = radius * 0.6;
 
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="flex-shrink-0 rounded-full">
-      {/* Render pie slices */}
-      {paths}
-      {/* Render speaker count in the center */}
-      <text
-        x="50%"
-        y="50%"
-        textAnchor="middle"
-        dy=".3em" // Adjust vertical alignment
-        fontSize={radius * 0.6} // Adjust font size relative to radius
-        fill="#FFFFFF" // White text
-        fontWeight="bold"
-      >
-        {speakerCount}
-      </text>
-    </svg>
+    <div style={{ width: size, height: size }} className="relative flex-shrink-0">
+      {/* Main Icon SVG (Pie Chart only) */}
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="rounded-full">
+        {/* Render pie slices */}
+        {paths}
+      </svg>
+
+      {/* Notification Badge (Absolutely Positioned Div) */}
+      {typeof contributionCount === 'number' && contributionCount > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            top: `-${badgeSize * 0.2}px`, // Adjust for overlap
+            right: `-${badgeSize * 0.2}px`, // Adjust for overlap
+            width: `${badgeSize}px`,
+            height: `${badgeSize}px`,
+            fontSize: `${badgeFontSize}px`,
+          }}
+          className="rounded-full bg-gray-600 text-white flex items-center justify-center font-bold border-2 border-white"
+        >
+          {contributionCount}
+        </div>
+      )}
+    </div>
   );
 };
 

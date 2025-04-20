@@ -9,6 +9,8 @@ interface ReactionBarProps {
     reactions: ReactionSummary[]; // Aggregated reactions for this specific speech
     userId: string | null; // ID of the currently logged-in user
     availableEmojis?: string[]; // Optional: Override default emojis
+    onMouseEnter?: () => void;
+    onMouseLeave?: () => void;
 }
 
 const DEFAULT_EMOJIS = ['👍', '❤️', '😂', '🤔', '👎'];
@@ -20,6 +22,8 @@ export const ReactionBar = ({
     reactions: initialReactions, // Rename prop for clarity
     userId,
     availableEmojis = DEFAULT_EMOJIS,
+    onMouseEnter,
+    onMouseLeave,
 }: ReactionBarProps) => {
     const [isLoading, setIsLoading] = useState<Record<string, boolean>>({});
     // --- Optimistic State ---
@@ -129,7 +133,11 @@ export const ReactionBar = ({
     // const reactionSummaryMap = new Map(reactions.map(r => [r.emoji, r])); // Removed, using useMemo above
 
     return (
-        <div className="flex space-x-1 mt-1">
+        <div
+            className="flex space-x-1 mt-1"
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        >
             {availableEmojis.map(emoji => {
                 // Use the derived map from optimistic state
                 const summary = reactionSummaryMap.get(emoji);

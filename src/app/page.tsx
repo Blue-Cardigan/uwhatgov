@@ -723,7 +723,7 @@ export default function Home() {
             </div>
 
             {/* Resizable Panel (Positioned absolutely at the bottom) */}
-            {viewMode === 'rewritten' && selectedOriginalIndex !== null && (
+            {selectedOriginalIndex !== null && (
                 <OriginalDebateViewer
                   viewMode={viewMode}
                   selectedOriginalIndex={selectedOriginalIndex}
@@ -739,7 +739,7 @@ export default function Home() {
             {/* Footer */}
             <footer className="p-3 border-t border-gray-700 bg-[#202c33] flex items-center gap-3 flex-shrink-0 z-10 h-16">
               {/* Simplified footer - Summary is now in the header dropdown */}
-              <input type="text" placeholder="uwhatgov" className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none" disabled />
+              <input type="text" placeholder="u what, gov?" className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none" disabled />
             </footer>
 
           </>

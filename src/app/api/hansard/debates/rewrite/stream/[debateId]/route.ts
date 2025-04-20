@@ -35,12 +35,16 @@ export async function GET(
 ) {
     // Create the server client inside the handler
     const supabase = createClient();
-    const debateId = params.debateId;
-
+    
     // Check auth using the server client
     const { data: { user } } = await supabase.auth.getUser();
+
+    // Access params *after* await
+    const debateId = params.debateId;
+
     if (!user) {
-        console.log(`[API Stream /${debateId}] Unauthorized access attempt.`);
+        // Use debateId *after* checking for user, otherwise it might be undefined if accessed before await
+        console.log(`[API Stream /${debateId ?? 'unknown'}] Unauthorized access attempt.`);
         return NextResponse.json({ type: 'error', payload: 'Unauthorized' }, { status: 401 });
     }
     console.log(`[API Stream /${debateId}] Authorized request for user ${user.id}.`);

@@ -523,6 +523,21 @@ const ChatView = forwardRef(({
       return;
     }
 
+    // *** Wait for auth to finish loading before proceeding ***
+    if (authLoading) {
+        console.log(`[ChatView setupRewrittenDebate] Waiting for auth loading to complete...`);
+        // Ensure loading state is true while waiting for auth
+        setIsLoadingRewritten(true);
+        setRewrittenDebate(null); // Clear any potentially stale data
+        speechesRef.current = [];
+        jsonBufferRef.current = '';
+        // Close any existing event source if auth state changes while connected
+        eventSourceRef.current?.close();
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+        return;
+    }
+
+    // Reset states before attempting setup
     setRewrittenDebate(null);
     setIsLoadingRewritten(true);
     setIsStreaming(false);
@@ -579,13 +594,25 @@ const ChatView = forwardRef(({
              setIsLoadingRewritten(false);
           }
         } else {
-          console.log(`${debateId} not cached/complete, streaming...`);
-          setIsLoadingRewritten(false);
-          setIsStreaming(true);
-          setRewrittenDebate(currentDebateData); // Show title while loading
-          speechesRef.current = [];
-          onRewrittenDebateUpdate([]); // Notify parent of empty initial state
-          connectEventSource(0);
+          // No cached version found or status is not 'success'
+          console.log(`${debateId} not cached/complete.`);
+          // *** Check authentication *before* attempting to stream ***
+          if (currentUserId) {
+            console.log(`User ${currentUserId} is logged in, proceeding to stream...`);
+            setIsLoadingRewritten(false); // Not loading cache anymore
+            setIsStreaming(true);
+            setRewrittenDebate(currentDebateData); // Show title while loading
+            speechesRef.current = [];
+            onRewrittenDebateUpdate([]); // Notify parent of empty initial state
+            connectEventSource(0);
+          } else {
+            // User is not logged in, block streaming
+            console.log(`User is not logged in. Blocking stream generation for ${debateId}.`);
+            setIsLoadingRewritten(false);
+            setIsStreaming(false);
+            setRewrittenDebate(null); // Ensure no placeholder/loading title is shown
+            // No need to call onRewrittenDebateUpdate as state is effectively empty
+          }
         }
       } catch (e: any) {
         console.error(`Setup error ${debateId}:`, e);
@@ -609,7 +636,7 @@ const ChatView = forwardRef(({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debateId, onRewrittenDebateUpdate]); // Removed connectEventSource
+  }, [debateId, onRewrittenDebateUpdate, authLoading, currentUserId, supabase]); // Removed connectEventSource
 
   const handleBubbleClickInternal = useCallback((index: number | undefined) => {
       console.log(`[ChatView] Bubble click index: ${index}. Calling parent.`);
@@ -797,7 +824,7 @@ const ChatView = forwardRef(({
 
     buildMap();
 
-  }, [rewrittenDebate?.speeches, originalDebateData?.Items, speakerPartyMap, getOrFetchParty]); // Added dependencies
+  }, [rewrittenDebate?.speeches, originalDebateData?.Items, getOrFetchParty]); // Removed speakerPartyMap from dependencies
 
   // Effect to handle scrolling and update isNearBottom state
   useEffect(() => {
@@ -829,8 +856,23 @@ const ChatView = forwardRef(({
       }
 
     if (viewMode === 'rewritten') {
+      // NEW: Check for logged-out state first, *only if* not loading and no debate loaded (cache miss)
+      if (!authLoading && !currentUserId && !isLoadingRewritten && !rewrittenDebate && debateId) {
+        return <div className="p-4 text-center text-yellow-300">You're the first! Log in to generate the Casual Version for this debate.</div>;
+      }
+
       if (isLoadingRewritten) return <div className="p-4 text-center text-gray-400">Loading Casual Version...</div>;
-      if (!rewrittenDebate) return <div className="p-4 text-center text-gray-400">Casual debate not available.</div>;
+      // Handle case where loading finished, user might be logged out, but no data (cache miss AND generation blocked/failed)
+      if (!rewrittenDebate) {
+          // If user is logged in but still no data, it might be unavailable/error
+          if (currentUserId) {
+               return <div className="p-4 text-center text-gray-400">Casual debate not generated yet or unavailable.</div>;
+          } else {
+               // If user is logged out and no data, we already showed the login message above.
+               // This case might occur briefly between states, show generic message or null.
+               return null; // Or a generic placeholder
+          }
+      }
 
       return (
         <>
