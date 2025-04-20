@@ -3,6 +3,7 @@ import { getHansardDebate } from '@/lib/hansardService';
 import { generateDebateStream } from '@/lib/geminiService';
 import { GenerateContentStreamResult, EnhancedGenerateContentResponse } from '@google/generative-ai';
 import { DebateContentItem } from '@/lib/hansard/types'; // Assuming types are here
+import { createClient } from '@supabase/supabase-js'; // Import Supabase client
 
 // Define the expected structure for the event stream data
 interface StreamEvent {
@@ -17,6 +18,26 @@ export const maxDuration = 60; // Set max duration for Vercel Edge Functions (ad
 
 // Keep-alive interval (e.g., 25 seconds)
 const PING_INTERVAL_MS = 25 * 1000;
+
+// Initialize Supabase client
+// Use NEXT_PUBLIC_ variables for consistency with frontend, but ideally use server-side specific keys if RLS requires service_role for writes.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("[API Route /stream] Supabase URL or Anon Key is missing.");
+  // Consider how to handle this globally or per-request. For now, log and continue.
+}
+// Ensure client is initialized only once if possible, or handle potential issues with Edge runtime re-initialization.
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+// Define Speech type based on ChatView usage
+interface Speech {
+  speaker: string;
+  text: string;
+  originalIndex?: number;
+  originalSnippet?: string;
+}
 
 export async function GET(
     request: NextRequest,
@@ -82,6 +103,19 @@ export async function GET(
 
     let geminiStreamResult: GenerateContentStreamResult | null;
     try {
+        // Update status to 'processing' before starting stream
+        if (supabase) {
+            const { error: statusUpdateError } = await supabase
+                .from('casual_debates_uwhatgov')
+                .update({ status: 'success', last_updated_at: new Date().toISOString() })
+                .eq('id', debateId);
+             if (statusUpdateError && statusUpdateError.code !== 'PGRST116') { // Ignore error if row doesn't exist yet
+                 console.warn(`[API Route /stream/${debateId}] Failed to update status to success (might be new debate):`, statusUpdateError.message);
+             } else if (!statusUpdateError) {
+                 console.log(`[API Route /stream/${debateId}] Updated status to success.`);
+             }
+        }
+
         geminiStreamResult = await generateDebateStream(combinedText, debateTitle, startIndex);
         if (!geminiStreamResult || !geminiStreamResult.stream) {
             throw new Error('Gemini service returned null or no stream.');
@@ -95,13 +129,31 @@ export async function GET(
     // --- Transform Gemini stream to SSE ---
     let pingIntervalId: NodeJS.Timeout | null = null;
     let buffer = ''; // Buffer to hold incomplete JSON strings
-    let hasSentValidSpeech = false; // Track if any valid speech was sent
+    let hasSentValidSpeech = false; // Track if any valid speech was sent - Now used to determine if upsert happens
 
     // State for combining narrative messages
     let lastSpeaker: string | null = null;
-    let bufferedNarrativePayload: { speaker: string; text: string; originalIndex: number; originalSnippet: string } | null = null;
+    let bufferedNarrativePayload: Speech | null = null;
 
-    const transformStream = new TransformStream({
+    // Define helper function in a scope accessible by both transform and flush
+    const sendBufferedNarrative = (controller: TransformStreamDefaultController<string>) => {
+        if (bufferedNarrativePayload) {
+            console.log(`[API Route /stream/${debateId}] Sending/Flushing combined narrative message (Index: ${bufferedNarrativePayload.originalIndex}).`);
+            bufferedNarrativePayload.text = bufferedNarrativePayload.text.trim();
+            if (bufferedNarrativePayload.text) {
+                const eventPayloadString = JSON.stringify(bufferedNarrativePayload);
+                const streamEvent: StreamEvent = { type: 'chunk', payload: eventPayloadString };
+                const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\n');
+                controller.enqueue(`data: ${formattedData}\n\n`);
+            } else {
+                 console.warn(`[API Route /stream/${debateId}] Skipping empty combined narrative message.`);
+            }
+            bufferedNarrativePayload = null;
+        }
+    };
+
+    // The TransformStream now expects validated Speech objects, not raw chunks
+    const transformStream = new TransformStream<Speech, string>({
         start(controller) {
             console.log(`[API Route /stream/${debateId}] SSE Transformer started.`);
             // Start sending pings
@@ -114,132 +166,43 @@ export async function GET(
             }, PING_INTERVAL_MS);
         },
         // The transform method receives chunks written to the writable side
-        async transform(chunk: EnhancedGenerateContentResponse, controller) {
-            // Helper function to enqueue the buffered narrative message
-            const sendBufferedNarrative = () => {
-                if (bufferedNarrativePayload) {
-                    console.log(`[API Route /stream/${debateId}] Sending combined narrative message (Index: ${bufferedNarrativePayload.originalIndex}).`);
-                    // Ensure text is trimmed before sending
-                    bufferedNarrativePayload.text = bufferedNarrativePayload.text.trim();
-                    if (bufferedNarrativePayload.text) { // Only send if there's actual text
-                        const streamEvent: StreamEvent = { type: 'chunk', payload: JSON.stringify(bufferedNarrativePayload) };
-                        const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
-                        controller.enqueue(`data: ${formattedData}\n\n`);
-                        hasSentValidSpeech = true; // Mark valid speech sent
-                    } else {
-                         console.warn(`[API Route /stream/${debateId}] Skipping empty combined narrative message.`);
-                    }
-                    bufferedNarrativePayload = null; // Clear buffer after sending
-                }
-            };
-
-            // Helper function to enqueue a regular non-narrative message
-            const sendRegularChunk = (payload: string) => {
-                 const streamEvent: StreamEvent = { type: 'chunk', payload: payload };
-                 const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
-                 controller.enqueue(`data: ${formattedData}\n\n`);
-            };
-             try {
-                 // Append new chunk text to the buffer
-                 buffer += chunk.text();
-
-                 // Attempt to find and process complete JSON objects in the buffer
-                 let lastIndex = 0;
-                 while (true) {
-                     const startIndex = buffer.indexOf('{', lastIndex);
-                     if (startIndex === -1) break; // No more potential objects
-
-                     let openBraces = 0;
-                     let endIndex = -1;
-                     for (let i = startIndex; i < buffer.length; i++) {
-                         if (buffer[i] === '{') {
-                             openBraces++;
-                         } else if (buffer[i] === '}') {
-                             openBraces--;
-                             if (openBraces === 0) {
-                                 endIndex = i;
-                                 break;
-                             }
-                         }
-                     }
-
-                     if (endIndex !== -1) {
-                         // Found a potential complete object
-                         const potentialJson = buffer.substring(startIndex, endIndex + 1);
-                         try {
-                             // Verify it's valid JSON (don't need the parsed object)
-                             JSON.parse(potentialJson);
-
-                             // Send the verified JSON object as a chunk
-                             const parsedSpeech = JSON.parse(potentialJson);
-                             if (parsedSpeech && typeof parsedSpeech.text === 'string' && parsedSpeech.text.trim()) {
-                                 if (parsedSpeech.speaker === 'System/Narrative') {
-                                    console.log(`[API Route /stream/${debateId}] Buffering narrative message (Index: ${parsedSpeech.originalIndex}).`);
-                                     if (lastSpeaker === 'System/Narrative' && bufferedNarrativePayload) {
-                                         // Append text to existing buffered narrative
-                                         bufferedNarrativePayload.text += ` ${parsedSpeech.text.trim()}`; // Add space between concatenated texts
-                                     } else {
-                                         // Send any previously buffered narrative first
-                                         sendBufferedNarrative();
-                                         // Start buffering this new narrative message
-                                         bufferedNarrativePayload = parsedSpeech;
-                                     }
-                                     lastSpeaker = 'System/Narrative';
-                                 } else {
-                                     // Speaker is not System/Narrative
-                                     // Send any buffered narrative first
-                                     sendBufferedNarrative();
-                                     // Send the current speaker's chunk
-                                     console.log(`[API Route /stream/${debateId}] Sending chunk for speaker: ${parsedSpeech.speaker} (Index: ${parsedSpeech.originalIndex}).`);
-                                     sendRegularChunk(potentialJson); // Send original JSON string
-                                     lastSpeaker = parsedSpeech.speaker;
-                                     hasSentValidSpeech = true; // Mark valid speech sent
-                                 }
-                             } else {
-                                 console.warn(`[API Route /stream/${debateId}] Skipping empty or invalid speech object: ${potentialJson.substring(0,100)}...`);
-                             }
-
-                             // Remove the processed object from the buffer
-                             buffer = buffer.substring(endIndex + 1);
-                             lastIndex = 0; // Reset search from the beginning of the modified buffer
-                         } catch (_parseError) {
-                             // It wasn't valid JSON, maybe braces were mismatched or inside strings.
-                             // Advance lastIndex to search past the start brace we found.
-                             console.warn(`[API Route /stream/${debateId}] Partial match is not valid JSON yet: ${potentialJson.substring(0,100)}...`);
-                             lastIndex = startIndex + 1;
-                         }
+        // Now receives a pre-validated Speech object
+        async transform(speech: Speech, controller) {
+            // Logic is now much simpler: Handle narrative buffering or send regular speech
+            try {
+                 if (speech.speaker === 'System/Narrative') {
+                    console.log(`[API Route /stream/${debateId} Transform] Buffering narrative message (Index: ${speech.originalIndex}).`);
+                     if (lastSpeaker === 'System/Narrative' && bufferedNarrativePayload) {
+                         bufferedNarrativePayload.text += ` ${speech.text.trim()}`; // Combine text
                      } else {
-                         // No closing brace found for the starting brace at startIndex
-                         // The rest of the buffer is potentially an incomplete object
-                         break;
+                         sendBufferedNarrative(controller); // Send previous narrative if any
+                         bufferedNarrativePayload = { ...speech }; // Buffer the new one (text is already trimmed in pipeGeneratorToStream)
                      }
+                     lastSpeaker = 'System/Narrative';
+                 } else {
+                     // Regular speaker
+                     sendBufferedNarrative(controller); // Send any pending narrative first
+                     console.log(`[API Route /stream/${debateId} Transform] Sending chunk for speaker: ${speech.speaker} (Index: ${speech.originalIndex}).`);
+                     const speechJsonString = JSON.stringify(speech);
+                     const streamEvent: StreamEvent = { type: 'chunk', payload: speechJsonString };
+                     const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\n');
+                     controller.enqueue(`data: ${formattedData}\n\n`);
+                     lastSpeaker = speech.speaker;
+                     // hasSentValidSpeech is managed solely in pipeGeneratorToStream now
                  }
-
-             } catch (error: any) {
-                console.error(`[API Route /stream/${debateId}] Error processing Gemini chunk:`, error);
-                // Send a generic error event downstream if chunk processing fails
-                 const errorEvent: StreamEvent = { type: 'error', payload: { message: `Error processing stream chunk: ${error.message}` } };
-                 // Escape newline characters in the JSON string for SSE data field
-                 const formattedData = JSON.stringify(errorEvent).replace(/\n/g, '\\n');
-                 controller.enqueue(`data: ${formattedData}\n\n`);
-                 // Clear buffer on significant error? Maybe not, depends on desired recovery.
-                 // buffer = '';
-             }
+            } catch (error: any) {
+                console.error(`[API Route /stream/${debateId} Transform] Error processing speech object:`, speech, error);
+                // Optionally send an error event downstream
+                const errorEvent: StreamEvent = { type: 'error', payload: { message: `Error processing speech object: ${error.message}` } };
+                const formattedErrorData = JSON.stringify(errorEvent).replace(/\n/g, '\n');
+                controller.enqueue(`data: ${formattedErrorData}\n\n`);
+            }
         },
         // Flush is called when the writable side is closed
         flush(controller) {
             // Send any remaining buffered narrative message before finishing
-            if (bufferedNarrativePayload) {
-                console.log(`[API Route /stream/${debateId}] Flushing final buffered narrative message (Index: ${bufferedNarrativePayload.originalIndex}).`);
-                // Ensure text is trimmed before sending
-                bufferedNarrativePayload.text = bufferedNarrativePayload.text.trim();
-                if (bufferedNarrativePayload.text) { // Only send if there's actual text
-                     const streamEvent: StreamEvent = { type: 'chunk', payload: JSON.stringify(bufferedNarrativePayload) };
-                     const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
-                     controller.enqueue(`data: ${formattedData}\n\n`);
-                     hasSentValidSpeech = true; // Mark valid speech sent
-                }
-            }
+            sendBufferedNarrative(controller); // Use the shared helper
+
             if (pingIntervalId) {
                 clearInterval(pingIntervalId);
                 pingIntervalId = null;
@@ -248,37 +211,8 @@ export async function GET(
             // Process any remaining data in the buffer when the stream ends
             let finalPayload = buffer.trim();
             if (finalPayload) {
-                console.log(`[API Route /stream/${debateId}] Flushing remaining buffer content: "${finalPayload.substring(0, 200)}..."`);
-                 try {
-                    // Try parsing the remaining buffer as is
-                    JSON.parse(finalPayload);
-                    // If it parses, send it directly
-                 } catch (_parseError: any) {
-                      // Parsing failed - potentially incomplete JSON
-                      console.warn(`[API Route /stream/${debateId}] Remaining buffer is not valid JSON: "${finalPayload.substring(0,100)}...". Attempting completion.`);
-                      // Attempt to complete it if it looks like an unclosed object
-                      if (finalPayload.startsWith('{') && !finalPayload.endsWith('}')) {
-                           console.log(`[API Route /stream/${debateId}] Appending '}' to incomplete JSON.`);
-                           finalPayload += '}';
-                           // Optional: Verify again after appending '}'
-                           try {
-                               JSON.parse(finalPayload);
-                               console.log(`[API Route /stream/${debateId}] Completion successful.`);
-                           } catch (completionParseError) {
-                               console.error(`[API Route /stream/${debateId}] Failed to parse after completing with '}':`, completionParseError);
-                               // Decide what to do: send the attempted completion, send an error, or send nothing?
-                               // Let's send the attempted completion for the client to handle.
-                           }
-                      } else {
-                          // Doesn't look like a simple unclosed object, send error maybe?
-                          // Or just send the fragment as is. Let's send as is for now.
-                          console.warn(`[API Route /stream/${debateId}] Remaining buffer doesn't appear to be simple incomplete JSON. Sending as is.`);
-                      }
-                 }
-                 // Send the final (potentially completed) buffer content as a chunk
-                  const streamEvent: StreamEvent = { type: 'chunk', payload: finalPayload };
-                  const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\\n');
-                  controller.enqueue(`data: ${formattedData}\n\n`);
+                console.warn(`[API Route /stream/${debateId}] Discarding non-empty buffer content during flush: "${finalPayload.substring(0, 200)}..."`);
+                // Do not attempt to send this potentially incomplete data
             }
              buffer = ''; // Clear buffer
 
@@ -288,14 +222,13 @@ export async function GET(
             // Finally, send the complete event
             if (hasSentValidSpeech) {
                  const completeEvent: StreamEvent = { type: 'complete' };
-                 // Escape newline characters in the JSON string for SSE data field
-                 const formattedCompleteData = JSON.stringify(completeEvent).replace(/\n/g, '\\n');
+                 const formattedCompleteData = JSON.stringify(completeEvent).replace(/\n/g, '\n');
                  controller.enqueue(`data: ${formattedCompleteData}\n\n`);
-                 console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with completion (Gemini stream ended).`);
+                 console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with completion event.`);
             } else {
                  console.warn(`[API Route /stream/${debateId}] No valid speeches found/generated. Sending error instead of complete.`);
                  const errorEvent: StreamEvent = { type: 'error', payload: { message: 'No valid content generated or found.' } }; // Slightly more general message
-                 const formattedErrorData = JSON.stringify(errorEvent).replace(/\n/g, '\\n');
+                 const formattedErrorData = JSON.stringify(errorEvent).replace(/\n/g, '\n');
                  controller.enqueue(`data: ${formattedErrorData}\n\n`);
                  console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with error (no valid content).`);
             }
@@ -305,18 +238,92 @@ export async function GET(
     // Function to pipe the AsyncGenerator to the WritableStream
     const pipeGeneratorToStream = async () => {
         const writer = transformStream.writable.getWriter();
+        const accumulatedSpeeches: Speech[] = []; // Accumulate speeches here
+        let streamError: Error | null = null;
+
+        // Buffer for raw text from Gemini stream
+        let geminiBuffer = '';
+
         try {
             // Iterate through the Gemini stream (AsyncGenerator)
             for await (const chunk of geminiStreamResult!.stream) {
-                // Write each chunk directly to the transformer's writable side
-                // The transformer's `transform` method will process it
-                await writer.write(chunk);
-            }
-            // Close the writer once the generator is finished
-            await writer.close();
-            console.log(`[API Route /stream/${debateId}] Gemini stream finished, writer closed.`);
+                // Process chunk to extract potential speeches BEFORE writing to the transformer
+                let chunkText = '';
+                 try {
+                    chunkText = chunk.text();
+                 } catch (textError: any) {
+                     console.warn(`[API Route /stream/${debateId}] Error getting text from chunk: ${textError.message}. Skipping chunk.`);
+                     continue; // Skip this chunk
+                 }
+
+                geminiBuffer += chunkText; // Add raw text to buffer for parsing logic
+
+                // --- Centralized Parsing & Validation Logic --- 
+                 let lastIndex = 0;
+                 while (true) {
+                     const startIndex = geminiBuffer.indexOf('{', lastIndex);
+                     if (startIndex === -1) break;
+
+                     let openBraces = 0;
+                     let endIndex = -1;
+                     for (let i = startIndex; i < geminiBuffer.length; i++) {
+                         if (geminiBuffer[i] === '{') openBraces++;
+                         else if (geminiBuffer[i] === '}') {
+                             openBraces--;
+                             if (openBraces === 0) {
+                                 endIndex = i;
+                                 break;
+                             }
+                         }
+                     }
+
+                     if (endIndex !== -1) {
+                         const potentialJson = geminiBuffer.substring(startIndex, endIndex + 1);
+                         try {
+                             const parsedSpeech: Speech = JSON.parse(potentialJson);
+
+                             // Centralized Validation
+                             if (parsedSpeech && typeof parsedSpeech.speaker === 'string' && parsedSpeech.speaker.trim() && typeof parsedSpeech.text === 'string' && parsedSpeech.text.trim()) {
+                                 // Trim text before accumulation/sending
+                                 parsedSpeech.text = parsedSpeech.text.trim();
+
+                                 // Handle narrative combining for accumulation
+                                 if (parsedSpeech.speaker === 'System/Narrative') {
+                                     const lastAccumulated = accumulatedSpeeches[accumulatedSpeeches.length - 1];
+                                     if (lastAccumulated && lastAccumulated.speaker === 'System/Narrative') {
+                                         lastAccumulated.text += ` ${parsedSpeech.text.trim()}`; // Combine text
+                                     } else {
+                                         accumulatedSpeeches.push({ ...parsedSpeech }); // Add new narrative (already trimmed)
+                                     }
+                                 } else {
+                                     accumulatedSpeeches.push(parsedSpeech); // Add regular speech
+                                 }
+                                 hasSentValidSpeech = true; // Mark that we have valid data
+                                 // Write the *validated object* to the TransformStream writer
+                                 await writer.write(parsedSpeech);
+
+                             } else {
+                                 console.warn(`[API Route /stream/${debateId} Accumulate] Skipping invalid speech object: ${potentialJson.substring(0,100)}...`);
+                             }
+                             // Remove processed part from buffer
+                             geminiBuffer = geminiBuffer.substring(endIndex + 1);
+                             lastIndex = 0;
+                         } catch (_parseError) {
+                             // Incomplete JSON, wait for more data
+                             lastIndex = startIndex + 1;
+                         }
+                     } else {
+                         // No closing brace found, break loop and wait for more chunks
+                         break;
+                     }
+                 }
+             }
+             // Close the writer once the generator is finished
+             await writer.close();
+             console.log(`[API Route /stream/${debateId}] Gemini stream finished, writer closed.`);
         } catch (err: any) {
             console.error(`[API Route /stream/${debateId}] Error reading/writing Gemini stream:`, err);
+            streamError = err; // Store error
             // Abort the writer on error
             await writer.abort(err).catch(abortErr => { // Catch potential error during abort
                  console.error(`[API Route /stream/${debateId}] Error aborting writer:`, abortErr);
@@ -330,6 +337,68 @@ export async function GET(
                  console.log(`[API Route /stream/${debateId}] Ping interval cleared in finally block.`);
             }
              // Note: writer.releaseLock() is usually not needed after close/abort
+
+            // --- Persist to Supabase ---
+            if (!supabase) {
+                console.error(`[API Route /stream/${debateId}] Supabase client not initialized. Cannot persist data.`);
+                return; // Exit if Supabase client failed to init
+            }
+
+            if (streamError) {
+                // Handle failure
+                console.error(`[API Route /stream/${debateId}] Stream failed. Updating status to 'failed'. Error: ${streamError.message}`);
+                const { error: updateError } = await supabase
+                    .from('casual_debates_uwhatgov')
+                    .update({
+                        status: 'failed',
+                        error_message: streamError.message,
+                        last_updated_at: new Date().toISOString()
+                    })
+                    .eq('id', debateId);
+                if (updateError) {
+                    console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' in Supabase:`, updateError);
+                }
+            } else if (hasSentValidSpeech && accumulatedSpeeches.length > 0) {
+                // Handle success
+                console.log(`[API Route /stream/${debateId}] Stream completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
+                const finalContent = {
+                    title: debateTitle, // Use the title fetched earlier
+                    speeches: accumulatedSpeeches
+                };
+                const contentString = JSON.stringify(finalContent);
+
+                const { error: upsertError } = await supabase
+                    .from('casual_debates_uwhatgov')
+                    .upsert({
+                        id: debateId,
+                        content: contentString,
+                        status: 'completed', // Mark as completed
+                        last_updated_at: new Date().toISOString(), // Explicitly set timestamp
+                        error_message: null // Clear any previous error message
+                    }, { onConflict: 'id' });
+
+                if (upsertError) {
+                    console.error(`[API Route /stream/${debateId}] Supabase upsert error:`, upsertError);
+                    // Optionally update status to 'failed' again if upsert fails
+                    await supabase.from('casual_debates_uwhatgov').update({ status: 'failed', error_message: `Upsert failed: ${upsertError.message}`, last_updated_at: new Date().toISOString() }).eq('id', debateId);
+                } else {
+                    console.log(`[API Route /stream/${debateId}] Persisted ${debateId} successfully.`);
+                }
+            } else {
+                // Handle case where stream finished but produced no valid speeches
+                console.warn(`[API Route /stream/${debateId}] Stream completed but no valid speeches were generated/accumulated. Updating status to 'failed'.`);
+                 const { error: updateError } = await supabase
+                    .from('casual_debates_uwhatgov')
+                    .update({
+                        status: 'failed',
+                        error_message: 'Stream completed successfully but generated no valid content.',
+                        last_updated_at: new Date().toISOString()
+                    })
+                    .eq('id', debateId);
+                 if (updateError && updateError.code !== 'PGRST116'){ // Ignore if row doesn't exist
+                     console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' (no content) in Supabase:`, updateError);
+                 }
+            }
         }
     };
 

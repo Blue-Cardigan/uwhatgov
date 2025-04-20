@@ -25,26 +25,26 @@ export const getPartyColorClass = (partyAbbreviation: string | null): string => 
   switch (partyAbbreviation) {
     case 'Con':
     case 'Conservative':
-      return 'text-blue-400'; // Conservative
+      return 'bg-gradient-to-r from-blue-400 to-blue-500 bg-clip-text text-transparent'; // Conservative Gradient
     case 'DUP':
-      return 'text-orange-400'; // Democratic Unionist Party
+      return 'bg-gradient-to-r from-orange-400 to-orange-500 bg-clip-text text-transparent'; // DUP Gradient
     case 'Lab':
     case 'Labour':
-      return 'text-red-400'; // Labour
+      return 'bg-gradient-to-r from-red-400 to-red-500 bg-clip-text text-transparent'; // Labour Gradient
     case 'LD':
     case 'Liberal Democrat':
-      return 'text-yellow-400'; // Liberal Democrat
+      return 'bg-gradient-to-r from-orange-400 to-orange-500 bg-clip-text text-transparent'; // Liberal Democrat Gradient
     case 'PC':
-      return 'text-green-400'; // Plaid Cymru
+      return 'bg-gradient-to-r from-green-400 to-green-500 bg-clip-text text-transparent'; // Plaid Cymru Gradient
     case 'UUP':
-      return 'text-purple-400'; // Ulster Unionist Party
+      return 'bg-gradient-to-r from-purple-400 to-purple-500 bg-clip-text text-transparent'; // Ulster Unionist Party Gradient
     case 'Ind':
     case 'Independent':
-      return 'text-orange-800'; // Independent
+      return 'bg-gradient-to-r from-orange-800 to-orange-600 bg-clip-text text-transparent'; // Independent Gradient
     case 'SNP':
-      return 'text-yellow-400'; // Scottish National Party
+      return 'bg-gradient-to-r from-yellow-300 to-yellow-500 bg-clip-text text-transparent'; // Scottish National Party Gradient
     case 'CB':
-      return 'text-orange-400'; // Crossbench
+      return 'bg-gradient-to-r from-red-400 to-blue-400 bg-clip-text text-transparent'; // Crossbench Gradient
     // Add more parties and colors as needed
     default:
       return 'text-gray-400'; // Default fallback color for unknown/no party

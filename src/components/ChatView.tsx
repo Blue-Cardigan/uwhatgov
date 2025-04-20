@@ -76,7 +76,6 @@ const ChatView = forwardRef(({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
   const eventSourceRef = useRef<EventSource | null>(null);
-  const persistAttemptedRef = useRef<boolean>(false);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const speechesRef = useRef<Speech[]>([]);
   const debateIdRef = useRef<string | null>(debateId);
@@ -112,7 +111,6 @@ const ChatView = forwardRef(({
         jsonBufferRef.current = '';
         pendingSpeechesQueueRef.current = [];
         isProcessingQueueRef.current = false;
-        persistAttemptedRef.current = false;
         setTypingSpeakerInfo(null);
         setIsReconnecting(false);
         setRetryAttempt(0);
@@ -159,69 +157,11 @@ const ChatView = forwardRef(({
     debateIdRef.current = debateId;
   }, [debateId]);
 
-  const persistToSupabase = useCallback(async () => {
-    const currentDebateId = debateIdRef.current;
-    const currentSpeeches = speechesRef.current;
-
-    if (!currentDebateId || !currentSpeeches || currentSpeeches.length === 0) {
-        console.log("Skipping persistence: No ID or speeches data.");
-        return;
-    }
-    console.log(`Persisting ${currentSpeeches.length} speeches for ${currentDebateId}...`);
-
-    const { error: updateStatusError } = await supabase
-        .from('casual_debates_uwhatgov')
-        .update({ status: 'processing' })
-        .eq('id', currentDebateId);
-
-    if (updateStatusError && updateStatusError.code !== 'PGRST116') {
-        console.error('Failed to update status to processing:', updateStatusError);
-    }
-
-    console.log(`[Supabase] Getting latest rewrite for ${currentDebateId}...`);
-    const existing = await supabase.from('casual_debates_uwhatgov').select('*').eq('id', currentDebateId).maybeSingle();
-    // Compare timestamps if existing record found
-    if (existing.data) {
-         console.log(`[Supabase] Existing entry found for ${currentDebateId}, checking timestamp...`);
-         const existingTimestamp = new Date(existing.data.updated_at).getTime();
-         const currentTimestamp = new Date().getTime();
-         // If the existing entry is recent enough (e.g., within the last hour), don't overwrite?
-         // This is a basic example, adjust threshold as needed
-         if (currentTimestamp - existingTimestamp < 3600 * 1000) { // 1 hour
-              console.log(`[Supabase] Existing entry for ${currentDebateId} is recent. Skipping persistence.`);
-              return; // Skip upsert if recent
-         }
-    }
-
-    console.log(`[Supabase] Persisting rewrite for ${currentDebateId}...`);
-    const { error: upsertError } = await supabase
-        .from('casual_debates_uwhatgov')
-        .upsert({
-            id: currentDebateId,
-            title: rewrittenDebate?.title ?? 'Unknown Title', // Use ref for title
-            speeches: speechesRef.current, // Use ref for speeches
-            status: 'completed', // Mark as completed
-            updated_at: new Date().toISOString(), // Update timestamp
-        }, { onConflict: 'id' });
-
-    if (upsertError) {
-        console.error(`Supabase upsert error ${currentDebateId}:`, upsertError);
-        await supabase.from('casual_debates_uwhatgov').update({ status: 'failed' }).eq('id', currentDebateId);
-    } else {
-        console.log(`Persisted ${currentDebateId} successfully.`);
-    }
-  }, [rewrittenDebate?.title]);
-
   // Function to process the queue of pending speeches with delay
   const processPendingSpeeches = useCallback(async () => {
       if (isProcessingQueueRef.current || pendingSpeechesQueueRef.current.length === 0) {
           // If already processing or queue is empty, check for completion
-          if (!isProcessingQueueRef.current && pendingSpeechesQueueRef.current.length === 0 && !isStreaming && !persistAttemptedRef.current && debateIdRef.current && speechesRef.current.length > 0) {
-              // If not processing, queue empty, streaming done, not persisted yet, and we have a debateId and speeches
-              console.log(`[Queue ${debateIdRef.current}] Queue empty & stream complete. Persisting.`);
-              persistAttemptedRef.current = true;
-              await persistToSupabase(); // Ensure persistence happens after all speeches are shown
-          }
+          // Persistence is now handled by the backend API route
           return;
       }
 
@@ -261,76 +201,105 @@ const ChatView = forwardRef(({
       } else {
           isProcessingQueueRef.current = false; // Should not happen if length check passed, but good practice
           setTypingSpeakerInfo(null);
-          processPendingSpeeches(); // Check again (e.g., for persistence)
+          processPendingSpeeches(); // Check again
       }
-  }, [persistToSupabase, onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS, isStreaming]);
+  // Removed persistToSupabase dependency
+  }, [onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS, isStreaming]);
 
   const processJsonBuffer = useCallback((isComplete = false) => {
       const buffer = jsonBufferRef.current;
       if (!buffer) return;
+
       const parsedSpeeches: Speech[] = [];
       let processedChars = 0;
-      let tempBuffer = buffer;
-      let startOffset = 0;
-      let trimmed = tempBuffer.trim();
-      if (trimmed.startsWith('[')) trimmed = trimmed.substring(1);
-      trimmed = trimmed.trimStart();
-      if (trimmed.startsWith(',')) trimmed = trimmed.substring(1);
-      trimmed = trimmed.trimStart();
-      startOffset = tempBuffer.length - trimmed.length;
-      tempBuffer = trimmed;
-      let openBrackets = 0;
-      let objectStartIndex = -1;
-      for (let i = 0; i < tempBuffer.length; i++) {
-          const char = tempBuffer[i];
-          if (char === '{') {
-              if (openBrackets === 0) objectStartIndex = i;
-              openBrackets++;
-          } else if (char === '}') {
-              if (openBrackets > 0) {
-                  openBrackets--;
-                  if (openBrackets === 0 && objectStartIndex !== -1) {
-                      const objectString = tempBuffer.substring(objectStartIndex, i + 1);
-                      try {
-                          const parsedObject = JSON.parse(objectString);
-                          if (parsedObject && typeof parsedObject.speaker === 'string' && typeof parsedObject.text === 'string') {
-                              const newSpeech: Speech = {
-                                  speaker: parsedObject.speaker,
-                                  text: parsedObject.text,
-                                  originalIndex: typeof parsedObject.originalIndex === 'number' ? parsedObject.originalIndex : undefined,
-                                  originalSnippet: typeof parsedObject.originalSnippet === 'string' ? parsedObject.originalSnippet : undefined,
-                              };
-                              parsedSpeeches.push(newSpeech);
-                              processedChars = startOffset + i + 1;
-                              objectStartIndex = -1;
-                              let lookAheadIndex = i + 1;
-                              while (lookAheadIndex < tempBuffer.length && /\s/.test(tempBuffer[lookAheadIndex])) {
-                                  lookAheadIndex++;
-                              }
-                              if (tempBuffer[lookAheadIndex] === ',') {
-                                  processedChars = startOffset + lookAheadIndex + 1;
-                              }
-                          } else {
-                              console.warn(`[Buffer ${debateIdRef.current}] Invalid object:`, parsedObject);
-                              objectStartIndex = -1;
-                          }
-                      } catch (e: any) {
-                           console.warn(`[Buffer ${debateIdRef.current}] Partial parse fail. ${e.message}`);
-                           objectStartIndex = -1;
-                           openBrackets = 0;
-                           break;
-                      }
+      let tempBuffer = buffer; // Work on a copy
+
+      // --- Robust JSON parsing --- adapted from backend
+      let lastIndex = 0;
+      while (true) {
+          const startIndex = tempBuffer.indexOf('{', lastIndex);
+          if (startIndex === -1) break; // No more potential objects
+
+          let openBraces = 0;
+          let endIndex = -1;
+          for (let i = startIndex; i < tempBuffer.length; i++) {
+              if (tempBuffer[i] === '{') {
+                  openBraces++;
+              } else if (tempBuffer[i] === '}') {
+                  openBraces--;
+                  if (openBraces === 0) {
+                      endIndex = i;
+                      break;
                   }
               }
           }
+
+          if (endIndex !== -1) {
+              // Found a potential complete object
+              const objectString = tempBuffer.substring(startIndex, endIndex + 1);
+              try {
+                  const parsedObject = JSON.parse(objectString);
+                  // Basic validation
+                  if (parsedObject && typeof parsedObject.speaker === 'string' && typeof parsedObject.text === 'string') {
+                      const newSpeech: Speech = {
+                          speaker: parsedObject.speaker,
+                          text: parsedObject.text,
+                          originalIndex: typeof parsedObject.originalIndex === 'number' ? parsedObject.originalIndex : undefined,
+                          originalSnippet: typeof parsedObject.originalSnippet === 'string' ? parsedObject.originalSnippet : undefined,
+                      };
+                      parsedSpeeches.push(newSpeech);
+                      processedChars = endIndex + 1; // Update processed characters based on the end of the valid object
+                      lastIndex = 0; // Reset search from the beginning of the *remaining* buffer
+                      tempBuffer = tempBuffer.substring(processedChars); // Update buffer for next iteration
+                      processedChars = 0; // Reset processedChars for the new tempBuffer
+
+                  } else if (parsedObject && !parsedObject.speaker && typeof parsedObject.text === 'string' && parsedObject.text.trim()) {
+                      // *** Handle Case: Missing speaker but valid text ***
+                      console.warn(`[Buffer ${debateIdRef.current}] Received object missing speaker, using default. Object:`, parsedObject);
+                      const newSpeech: Speech = {
+                          speaker: 'Unknown Speaker', // Use default speaker
+                          text: parsedObject.text,
+                          originalIndex: typeof parsedObject.originalIndex === 'number' ? parsedObject.originalIndex : undefined,
+                          originalSnippet: typeof parsedObject.originalSnippet === 'string' ? parsedObject.originalSnippet : undefined,
+                      };
+                      parsedSpeeches.push(newSpeech);
+                      processedChars = endIndex + 1;
+                      lastIndex = 0;
+                      tempBuffer = tempBuffer.substring(processedChars);
+                      processedChars = 0;
+                  } else {
+                       console.warn(`[Buffer ${debateIdRef.current}] Invalid object format (other):`, parsedObject);
+                      lastIndex = endIndex + 1;
+                  }
+              } catch (e: any) {
+                  // Not valid JSON yet, could be incomplete. Advance past the starting brace.
+                  console.warn(`[Buffer ${debateIdRef.current}] Partial JSON or parse error at index ${startIndex}: ${e.message}. String: ${objectString.substring(0, 50)}...`);
+                  lastIndex = startIndex + 1;
+              }
+          } else {
+              // No closing brace found for the starting brace at startIndex
+              // The rest of the buffer is potentially an incomplete object, wait for more data
+              break;
+          }
       }
-      if (processedChars > 0) {
-           jsonBufferRef.current = jsonBufferRef.current.substring(processedChars);
+      // --- End Robust JSON parsing ---
+
+      // Update the main buffer reference only after processing the temporary one
+      if (lastIndex > 0) { // If we broke due to incomplete JSON
+          // Keep the potentially incomplete part
+          jsonBufferRef.current = buffer.substring(lastIndex);
+      } else { // If we processed everything or the loop didn't run
+          jsonBufferRef.current = tempBuffer; // Assign the remaining part of tempBuffer
       }
-       const remainingTrimmed = jsonBufferRef.current.trim();
-       if (isComplete && remainingTrimmed && remainingTrimmed !== ']') {
-           console.error(`[Buffer ${debateIdRef.current}] Unexpected remaining:`, jsonBufferRef.current);
-       }
+
+
+      const remainingTrimmed = jsonBufferRef.current.trim();
+      if (isComplete && remainingTrimmed) {
+          console.warn(`[Buffer ${debateIdRef.current}] Clearing remaining buffer content after completion:`, jsonBufferRef.current);
+          // Optionally clear buffer here if completion means it should be empty
+          jsonBufferRef.current = ''; // Explicitly clear buffer on completion
+      }
+
       if (parsedSpeeches.length > 0) {
           // Add parsed speeches to the pending queue instead of directly updating state
           pendingSpeechesQueueRef.current.push(...parsedSpeeches);
@@ -360,7 +329,9 @@ const ChatView = forwardRef(({
     es.onerror = (err) => {
       console.error(`[SSE ${debateId}] Error (Attempt ${attempt + 1}):`, err);
       es.close();
-      eventSourceRef.current = null;
+      if (eventSourceRef.current === es) {
+         eventSourceRef.current = null;
+      }
       if (attempt < MAX_RETRIES) {
         const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
         setRetryAttempt(attempt + 1);
@@ -403,10 +374,16 @@ const ChatView = forwardRef(({
           processJsonBuffer(true);
           jsonBufferRef.current = '';
           setIsStreaming(false);
+          if (eventSourceRef.current === es) {
+              eventSourceRef.current = null;
+          }
           es.close();
       } else if (streamEvent.type === 'error') {
           console.error(`[SSE ${debateId}] Stream error:`, streamEvent.payload?.message);
           setIsStreaming(false);
+          if (eventSourceRef.current === es) {
+              eventSourceRef.current = null;
+          }
           es.close();
       } else {
            console.log(`[SSE ${debateId}] Unhandled type:`, streamEvent.type);
@@ -424,7 +401,6 @@ const ChatView = forwardRef(({
       if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
       speechesRef.current = [];
       jsonBufferRef.current = '';
-      persistAttemptedRef.current = false;
       return;
     }
 
@@ -433,12 +409,17 @@ const ChatView = forwardRef(({
     setIsStreaming(false);
     setIsReconnecting(false);
     setRetryAttempt(0);
-    persistAttemptedRef.current = false;
     speechesRef.current = [];
     jsonBufferRef.current = '';
 
     if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
     eventSourceRef.current?.close();
+
+    // *** Prevent duplicate stream initiation ***
+    if (eventSourceRef.current) {
+       console.warn(`[ChatView setupRewrittenDebate] Stream already exists for ${debateId}. Aborting setup.`);
+       return;
+    }
 
     const setupRewrittenDebate = async () => {
       setIsLoadingRewritten(true);
@@ -501,8 +482,12 @@ const ChatView = forwardRef(({
           clearTimeout(retryTimeoutRef.current);
           console.log(`Cleared retry timeout for ${debateId} on cleanup`);
       }
-      eventSourceRef.current?.close();
-      console.log(`SSE closed for ${debateId} on cleanup`);
+      const esToClose = eventSourceRef.current; // Capture ref before clearing
+      eventSourceRef.current = null; // Clear ref
+      if (esToClose) {
+          esToClose.close();
+          console.log(`SSE closed for ${debateId} on cleanup`);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debateId, onRewrittenDebateUpdate]); // Removed connectEventSource
