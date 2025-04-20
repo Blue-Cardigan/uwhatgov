@@ -5,17 +5,18 @@ import { InternalDebateSummary, DebateMetadata } from '@/types';
 // Import Hansard API types
 import { SearchResult, DebateSummary } from '@/lib/hansard/types';
 import DebateMetadataIcon from './DebateMetadataIcon'; // Import the new icon component
-import { DebateMetadataResponse } from '@/app/api/hansard/debates/[id]/metadata/route'; // Import response type
 
 interface ChatListProps {
   onSelectDebate: (debateSummary: InternalDebateSummary) => void;
   selectedDebateId: string | null;
+  allMetadata: Record<string, DebateMetadata>; // Added prop for centralized cache
+  onItemVisible: (id: string) => void; // Added callback for item visibility
 }
 
 // Helper to get today's date in YYYY-MM-DD format
 const getTodayDateString = () => new Date().toISOString().split('T')[0];
 
-export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListProps) {
+export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata, onItemVisible }: ChatListProps) {
   const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -23,7 +24,6 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
   const [lastSittingDate, setLastSittingDate] = useState<string | null>(null);
   const [oldestDateLoaded, setOldestDateLoaded] = useState<string | null>(null);
   const [canLoadMore, setCanLoadMore] = useState(true);
-  const [metadataCache, setMetadataCache] = useState<Record<string, DebateMetadata>>({});
   const observedItemsRef = useRef<Map<string, IntersectionObserverEntry>>(new Map());
   const observerRef = useRef<IntersectionObserver | null>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -33,6 +33,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
   const [endDateFilter, setEndDateFilter] = useState('');
   const [houseFilter, setHouseFilter] = useState(''); // 'Commons', 'Lords', or '' for both
   const [isSearchActive, setIsSearchActive] = useState(false); // Track if search/filters are active
+  const [showFilters, setShowFilters] = useState(false); // State to control filter dropdown visibility
 
   // Helper to format date string
   const formatDate = (isoDateString: string) => {
@@ -100,40 +101,6 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     }
   }, []);
 
-  // Function to fetch metadata for a specific debate ID
-  const fetchMetadata = useCallback(async (debateId: string) => {
-    // Avoid fetching if already cached or currently loading
-    if (metadataCache[debateId]?.isLoading || metadataCache[debateId]?.partyRatios) {
-        // console.log(`[Metadata ${debateId}] Skipping fetch (loading or cached).`);
-        return;
-    }
-
-    // Mark as loading
-    setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId]), isLoading: true, error: null } }));
-    console.log(`[Metadata ${debateId}] Fetching...`);
-
-    try {
-        const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
-        if (!response.ok) {
-            let errorMsg = `Metadata fetch failed: ${response.status}`;
-            try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) { }
-            throw new Error(errorMsg);
-        }
-        const metadata: DebateMetadataResponse = await response.json();
-        setMetadataCache(prev => ({
-            ...prev,
-            [debateId]: { ...metadata, isLoading: false, error: null }
-        }));
-        console.log(`[Metadata ${debateId}] Success.`);
-    } catch (e: any) {
-        console.error(`[Metadata ${debateId}] Failed:`, e);
-        setMetadataCache(prev => ({
-            ...prev,
-            [debateId]: { ...(prev[debateId]), isLoading: false, error: e.message || 'Failed to load' }
-        }));
-    }
-  }, [metadataCache]); // Depend on metadataCache
-
   // Fetch last sitting date on mount
   useEffect(() => {
     fetchLastSittingDate();
@@ -157,7 +124,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
         setDebates([]);
         setOldestDateLoaded(null);
         setCanLoadMore(true);
-        setMetadataCache({});
+        // setMetadataCache({}); // Removed internal cache reset
         // Trigger fetch for the last sitting date if available
         if (lastSittingDate) {
             fetchDebates(lastSittingDate);
@@ -173,7 +140,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     setCanLoadMore(false); // Disable pagination during filtered search
     setIsLoading(true);
     setError(null);
-    setMetadataCache({}); // Clear metadata on new search
+    // setMetadataCache({}); // Removed internal cache reset
 
     // Construct search query parameters
     const params = new URLSearchParams();
@@ -196,14 +163,46 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
             throw new Error(`HTTP error! status: ${response.status} - ${errorText.substring(0, 100)}`);
         }
         const data: SearchResult = await response.json();
-        const mappedDebates: InternalDebateSummary[] = data.Debates.map((debate: DebateSummary) => ({
-            id: debate.DebateSectionExtId,
-            title: debate.Title || debate.DebateSection,
-            date: formatDate(debate.SittingDate),
-            house: debate.House,
-        }));
-        // Sort search results by date descending (most recent first)
-        setDebates(mappedDebates.sort((a, b) => b.date.localeCompare(a.date)));
+
+        // Use a Map to store unique debates by ID, preventing duplicates
+        const uniqueDebates = new Map<string, InternalDebateSummary>();
+
+        // Process Contributions first
+        if (data.Contributions) {
+            data.Contributions.forEach(contribution => {
+                // Only add if DebateSectionExtId is present and not already added
+                if (contribution.DebateSectionExtId && !uniqueDebates.has(contribution.DebateSectionExtId)) {
+                    uniqueDebates.set(contribution.DebateSectionExtId, {
+                        id: contribution.DebateSectionExtId,
+                        title: contribution.DebateSection || 'Contribution Section', // Use DebateSection as title
+                        date: formatDate(contribution.SittingDate),
+                        house: contribution.House,
+                        // Optionally include contribution-specific details if needed later
+                        // match: contribution.ContributionText.substring(0, 100) + '...' // Example match snippet
+                    });
+                }
+            });
+        }
+
+        // Process Debates - potentially overwriting entries from contributions if a specific Debate entry exists
+        if (data.Debates) {
+             data.Debates.forEach(debate => {
+                 if (debate.DebateSectionExtId) { // Ensure ID exists
+                     uniqueDebates.set(debate.DebateSectionExtId, {
+                         id: debate.DebateSectionExtId,
+                         title: debate.Title || debate.DebateSection, // Prefer Title if available
+                         date: formatDate(debate.SittingDate),
+                         house: debate.House,
+                     });
+                 }
+             });
+        }
+
+        // Convert map values back to an array and sort
+        const combinedDebates = Array.from(uniqueDebates.values())
+                                     .sort((a, b) => b.date.localeCompare(a.date)); // Sort by date descending
+
+        setDebates(combinedDebates);
 
         // Determine if more search results *might* exist - API doesn't directly tell us
         // Heuristic: If we got results, assume there *could* be more for now.
@@ -262,7 +261,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     // Also depends on handleLoadPreviousDay potentially changing if its deps change
   }, [isLoading, canLoadMore, handleLoadPreviousDay, isSearchActive]); // Use isSearchActive instead of searchTerm
 
-  // Use a single observer for all items
+  // Use a single observer for all items - NOW CALLS onItemVisible prop
   useEffect(() => {
       observerRef.current = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
@@ -270,8 +269,8 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
               if (debateId) {
                   if (entry.isIntersecting) {
                       observedItemsRef.current.set(debateId, entry);
-                      // Fetch metadata when item becomes visible
-                      fetchMetadata(debateId);
+                      // Call parent function when item becomes visible
+                      onItemVisible(debateId);
                   } else {
                       observedItemsRef.current.delete(debateId);
                   }
@@ -293,7 +292,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
           currentObserver.disconnect();
           observerRef.current = null;
       };
-  }, [debates, fetchMetadata]); // Re-run if debates or fetchMetadata changes
+  }, [debates, onItemVisible]); // Re-run if debates or onItemVisible changes
 
   // Function to set ref for each item
   const setItemRef = (debateId: string, element: HTMLDivElement | null) => {
@@ -318,74 +317,90 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
       {/* Search Bar & Filters */}
       <div className="p-3 bg-[#202c33] border-b border-gray-700">
         <form onSubmit={handleSearch} className="flex flex-col gap-2">
-          {/* Keyword Search */}
-          <input
-            type="text"
-            placeholder="Search debates (keywords)..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-          />
-          {/* Filters Row */}
-          <div className="flex flex-wrap gap-2 items-center">
-             {/* House Filter */}
-             <select
-                value={houseFilter}
-                onChange={(e) => setHouseFilter(e.target.value)}
-                className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer"
-             >
-                <option value="">Any House</option>
-                <option value="Commons">Commons</option>
-                <option value="Lords">Lords</option>
-             </select>
-             {/* Date Filters */}
-             <div className="flex gap-2 items-center text-sm text-gray-400">
-               <span>From:</span>
-               <input
-                 type="date"
-                 value={startDateFilter}
-                 onChange={(e) => setStartDateFilter(e.target.value)}
-                 className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                 // max={endDateFilter || getTodayDateString()} // Optional: prevent start date after end date
-                 max={getTodayDateString()} // Prevent future dates
-               />
-               <span>To:</span>
-               <input
-                 type="date"
-                 value={endDateFilter}
-                 onChange={(e) => setEndDateFilter(e.target.value)}
-                 className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                 min={startDateFilter} // Optional: prevent end date before start date
-                 max={getTodayDateString()} // Prevent future dates
-               />
-             </div>
-             {/* Search/Clear Button */}
-             <button
-                type="submit"
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md disabled:opacity-50 transition-colors"
-                disabled={isLoading}
-             >
-               {isLoading ? 'Searching...' : 'Search'}
-             </button>
-              {/* Optional: Clear Filters Button */}
-              {(searchTerm || startDateFilter || endDateFilter || houseFilter) && (
-                <button
-                    type="button"
-                    onClick={() => {
-                        setSearchTerm('');
-                        setStartDateFilter('');
-                        setEndDateFilter('');
-                        setHouseFilter('');
-                        // Trigger handleSearch without event to reset view
-                        handleSearch();
-                    }}
-                    className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm"
-                    title="Clear search and filters"
-                 >
-                    Clear
-                 </button>
-              )}
+          {/* Keyword Search & Filter Toggle Row */}
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              placeholder="Search debates (keywords)..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            />
+            <button
+              type="button"
+              onClick={() => setShowFilters(!showFilters)}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm"
+              title={showFilters ? "Hide Filters" : "Show Filters"}
+            >
+              Filters {showFilters ? '▲' : '▼'}
+            </button>
           </div>
+
+          {/* Collapsible Filters Section */}
+          {showFilters && (
+             <div className="flex flex-col sm:flex-row flex-wrap gap-2 items-center border-t border-gray-600 pt-2 mt-2">
+                 {/* House Filter */}
+                 <select
+                    value={houseFilter}
+                    onChange={(e) => setHouseFilter(e.target.value)}
+                    className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer w-full sm:w-auto"
+                 >
+                    <option value="">Any House</option>
+                    <option value="Commons">Commons</option>
+                    <option value="Lords">Lords</option>
+                 </select>
+                 {/* Date Filters */}
+                 <div className="flex flex-col sm:flex-row gap-2 items-center text-sm text-gray-400 w-full sm:w-auto">
+                   <span className="hidden sm:inline">From:</span>
+                   <input
+                     type="date"
+                     aria-label="Start date filter"
+                     value={startDateFilter}
+                     onChange={(e) => setStartDateFilter(e.target.value)}
+                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full sm:w-auto"
+                     max={endDateFilter || getTodayDateString()} // Adjust max based on end date
+                   />
+                   <span className="hidden sm:inline">To:</span>
+                   <input
+                     type="date"
+                     aria-label="End date filter"
+                     value={endDateFilter}
+                     onChange={(e) => setEndDateFilter(e.target.value)}
+                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full sm:w-auto"
+                     min={startDateFilter}
+                     max={getTodayDateString()}
+                   />
+                 </div>
+                 {/* Actions Row - Moved inside filters */}
+                 <div className="flex gap-2 items-center w-full sm:w-auto sm:ml-auto">
+                     <button
+                        type="submit"
+                        className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md disabled:opacity-50 transition-colors flex-grow sm:flex-grow-0"
+                        disabled={isLoading}
+                     >
+                       {isLoading ? 'Searching...' : 'Apply'}
+                     </button>
+                      {/* Clear Filters Button */}
+                      {(searchTerm || startDateFilter || endDateFilter || houseFilter) && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSearchTerm('');
+                                setStartDateFilter('');
+                                setEndDateFilter('');
+                                setHouseFilter('');
+                                // Trigger handleSearch without event to reset view
+                                handleSearch();
+                            }}
+                            className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm flex-grow sm:flex-grow-0"
+                            title="Clear search and filters"
+                         >
+                            Clear
+                         </button>
+                      )}
+                 </div>
+             </div>
+          )}
         </form>
       </div>
 
@@ -397,9 +412,10 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
         {!isLoading && !error && debates.length === 0 && (
           <p className="p-4 text-center text-gray-400">No debates found for the selected criteria.</p>
         )}
-        {/* Debate Items */}
+        {/* Debate Items - Use allMetadata prop */}
         {debates.map((debate) => {
           const isSelected = debate.id === selectedDebateId; // Check if this debate is selected
+          const metadata = allMetadata[debate.id]; // Get metadata from the prop
           return (
               <div
                 ref={(el) => setItemRef(debate.id, el)}
@@ -408,8 +424,8 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
                 onClick={() => onSelectDebate(debate)}
                 className={`p-3 cursor-pointer transition-colors duration-150 flex items-center gap-3 ${isSelected ? 'bg-teal-800' : 'hover:bg-[#2a3942]'}`}
               >
-                {/* Placeholder for Avatar/Icon */}
-                <DebateMetadataIcon metadata={metadataCache[debate.id]} />
+                {/* Pass metadata from prop to the icon */}
+                <DebateMetadataIcon metadata={metadata} />
                 <div className="flex-grow overflow-hidden">
                   <div className="flex justify-between items-center mb-1">
                     <h3 className="font-semibold text-gray-100 truncate" title={debate.title}>{debate.title}</h3>
@@ -418,11 +434,12 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
                   <div className="text-sm text-gray-400 truncate flex justify-between">
                      <span>{debate.house}</span>
                      <span className="flex items-center gap-2 text-xs whitespace-nowrap ml-2">
-                        {metadataCache[debate.id]?.location && (
-                           <span title="Location">{metadataCache[debate.id]?.location}</span>
+                        {/* Read details from the passed metadata object */}
+                        {metadata?.location && (
+                           <span title="Location">{metadata.location}</span>
                         )}
-                        {typeof metadataCache[debate.id]?.contributionCount === 'number' && (
-                           <span title="Contributions">({metadataCache[debate.id]?.contributionCount})</span>
+                        {typeof metadata?.contributionCount === 'number' && (
+                           <span title="Contributions">({metadata.contributionCount})</span>
                         )}
                      </span>
                   </div>

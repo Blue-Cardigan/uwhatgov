@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { MessageBubble, HighlightedText } from './MessageBubble';
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types';
 import { parsePartyAbbreviation } from '@/lib/partyColors';
+import { TypingIndicator } from './TypingIndicator';
 
 // Define types locally for the rewritten version
 export interface Speech {
@@ -32,6 +33,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Supabase URL or Anon Key is missing.");
 }
 const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
+
+// localStorage key for party cache
+const MEMBER_PARTY_CACHE_PREFIX = 'uwhatgov_member_party_';
 
 interface ChatViewProps {
   debateId: string | null; // Allow null if no debate selected
@@ -109,6 +113,9 @@ const ChatView = forwardRef(({
   const [retryAttempt, setRetryAttempt] = useState(0);
   const MAX_RETRIES = 5;
   const INITIAL_RETRY_DELAY_MS = 1000;
+  const SPEECH_DISPLAY_DELAY_MS = 750;
+
+  const [typingSpeakerInfo, setTypingSpeakerInfo] = useState<{ speaker: string, party: string | null } | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -119,6 +126,12 @@ const ChatView = forwardRef(({
   const jsonBufferRef = useRef<string>('');
   const itemRefs = useRef<Map<number, HTMLDivElement | null>>(new Map()); // Ref map for items
   const [speakerPartyMap, setSpeakerPartyMap] = useState<Map<string, string | null>>(new Map()); // Map base speaker name -> party abbreviation (or null)
+  const currentlyFetchingParties = useRef<Set<number>>(new Set()); // Track ongoing party fetches
+
+  // Refs for delayed display queue
+  const pendingSpeechesQueueRef = useRef<Speech[]>([]);
+  const isProcessingQueueRef = useRef<boolean>(false);
+  const speechDisplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Expose scrollToItem method to parent via ref
   useImperativeHandle(ref, () => ({
@@ -238,6 +251,7 @@ const ChatView = forwardRef(({
     };
     es.onmessage = (event) => {
       setIsReconnecting(false);
+      setTypingSpeakerInfo(null);
       let streamEvent;
       try {
           streamEvent = JSON.parse(event.data);
@@ -262,10 +276,6 @@ const ChatView = forwardRef(({
           console.log(`[SSE ${debateId}] Complete`);
           processJsonBuffer(true);
           jsonBufferRef.current = '';
-          if (!persistAttemptedRef.current) {
-              persistAttemptedRef.current = true;
-              persistToSupabase();
-          }
           setIsStreaming(false);
           es.close();
       } else if (streamEvent.type === 'error') {
@@ -345,28 +355,67 @@ const ChatView = forwardRef(({
            console.error(`[Buffer ${debateId}] Unexpected remaining:`, jsonBufferRef.current);
        }
       if (parsedSpeeches.length > 0) {
-          const currentSpeeches = speechesRef.current;
-          const newSpeechesToAdd = parsedSpeeches.filter(newSpeech => {
-              const last = currentSpeeches[currentSpeeches.length - 1];
-              return !last || !(last.speaker === newSpeech.speaker && last.text === newSpeech.text);
-          });
-          if (newSpeechesToAdd.length > 0) {
-              speechesRef.current = [...currentSpeeches, ...newSpeechesToAdd];
-              setRewrittenDebate(prev => {
-                   // Ensure we have a valid ID before updating state that requires it
-                   const currentDebateId = debateIdRef.current;
-                   if (!currentDebateId) return prev; // Don't update if ID is somehow null
-
-                   const base = prev ?? { id: currentDebateId, title: 'Loading... ', speeches: [] };
-                   return {
-                      ...base,
-                      speeches: speechesRef.current
-                   };
-              });
-              onRewrittenDebateUpdate(speechesRef.current); // Notify parent
+          // Add parsed speeches to the pending queue instead of directly updating state
+          pendingSpeechesQueueRef.current.push(...parsedSpeeches);
+          // Start processing the queue if not already running
+          if (!isProcessingQueueRef.current) {
+              processPendingSpeeches();
           }
       }
   };
+
+  // Function to process the queue of pending speeches with delay
+  const processPendingSpeeches = useCallback(async () => {
+      if (isProcessingQueueRef.current || pendingSpeechesQueueRef.current.length === 0) {
+          // If already processing or queue is empty, check for completion
+          if (!isProcessingQueueRef.current && pendingSpeechesQueueRef.current.length === 0 && !isStreaming && !persistAttemptedRef.current && debateIdRef.current && speechesRef.current.length > 0) {
+              // If not processing, queue empty, streaming done, not persisted yet, and we have a debateId and speeches
+              console.log(`[Queue ${debateIdRef.current}] Queue empty & stream complete. Persisting.`);
+              persistAttemptedRef.current = true;
+              await persistToSupabase(); // Ensure persistence happens after all speeches are shown
+          }
+          return;
+      }
+
+      isProcessingQueueRef.current = true;
+      const speechToShow = pendingSpeechesQueueRef.current.shift();
+
+      if (speechToShow) {
+          const baseSpeakerName = getBaseSpeakerName(speechToShow.speaker);
+          const partyAbbreviation = speakerPartyMap.get(baseSpeakerName) ?? null;
+          setTypingSpeakerInfo({ speaker: baseSpeakerName, party: partyAbbreviation });
+
+          // Clear previous timeout if exists
+          if (speechDisplayTimeoutRef.current) {
+              clearTimeout(speechDisplayTimeoutRef.current);
+          }
+
+          speechDisplayTimeoutRef.current = setTimeout(() => {
+              setTypingSpeakerInfo(null); // Hide typing indicator
+
+              // Add the speech to the actual displayed state
+              speechesRef.current = [...speechesRef.current, speechToShow];
+              setRewrittenDebate(prev => {
+                  const currentDebateId = debateIdRef.current;
+                  if (!currentDebateId) return prev;
+                  const base = prev ?? { id: currentDebateId, title: 'Loading...', speeches: [] };
+                  return {
+                      ...base,
+                      speeches: speechesRef.current
+                  };
+              });
+              onRewrittenDebateUpdate(speechesRef.current); // Notify parent
+
+              isProcessingQueueRef.current = false;
+              speechDisplayTimeoutRef.current = null;
+              processPendingSpeeches(); // Process next item in queue
+          }, SPEECH_DISPLAY_DELAY_MS);
+      } else {
+          isProcessingQueueRef.current = false; // Should not happen if length check passed, but good practice
+          setTypingSpeakerInfo(null);
+          processPendingSpeeches(); // Check again (e.g., for persistence)
+      }
+  }, [persistToSupabase, onRewrittenDebateUpdate, speakerPartyMap, SPEECH_DISPLAY_DELAY_MS, isStreaming]);
 
   useEffect(() => {
     if (!debateId) {
@@ -468,72 +517,184 @@ const ChatView = forwardRef(({
   useEffect(() => {
     const timer = setTimeout(() => {
       // Only auto-scroll to end if not searching/highlighting
-      if (highlightedIndex === null) {
+      if (highlightedIndex === null && !typingSpeakerInfo) {
           chatEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'smooth' : 'auto' });
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [rewrittenDebate?.speeches, originalDebateData?.Items, isStreaming, viewMode, highlightedIndex]);
+  }, [rewrittenDebate?.speeches, originalDebateData?.Items, isStreaming, viewMode, highlightedIndex, typingSpeakerInfo]);
 
-  // Effect to build the speaker-party map from rewritten speeches
+  // Function to get party from cache or fetch it
+  const getOrFetchParty = useCallback(async (memberId: number, baseName: string): Promise<string | null> => {
+      // 1. Check localStorage
+      const cacheKey = MEMBER_PARTY_CACHE_PREFIX + memberId;
+      try {
+          const cachedParty = localStorage.getItem(cacheKey);
+          if (cachedParty) {
+              // console.log(`[Party Cache] HIT localStorage for member ${memberId}: ${cachedParty}`);
+              return cachedParty === 'null' ? null : cachedParty; // Handle explicitly stored null
+          }
+      } catch (e) {
+          console.error(`[Party Cache] Error reading localStorage for member ${memberId}:`, e);
+      }
+
+      // 2. Check if already fetching
+      if (currentlyFetchingParties.current.has(memberId)) {
+          // console.log(`[Party Cache] Already fetching party for member ${memberId}`);
+          return null; // Don't trigger another fetch
+      }
+
+      // 3. Fetch from API
+      // console.log(`[Party Cache] MISS localStorage for member ${memberId} (${baseName}). Fetching...`);
+      currentlyFetchingParties.current.add(memberId);
+      let fetchedParty: string | null = null;
+      try {
+          const response = await fetch(`/api/members/${memberId}`);
+          if (response.ok) {
+              const memberInfo: { party?: string } = await response.json();
+              fetchedParty = memberInfo.party || null;
+              // console.log(`[Party Cache] Fetched party for member ${memberId}: ${fetchedParty}`);
+
+              // 4. Store in localStorage
+              try {
+                  localStorage.setItem(cacheKey, fetchedParty === null ? 'null' : fetchedParty);
+              } catch (e) {
+                  console.error(`[Party Cache] Error writing localStorage for member ${memberId}:`, e);
+              }
+
+              // 5. Update state map immediately (will trigger re-render)
+              setSpeakerPartyMap(prevMap => {
+                  // Check if the component is still dealing with the same debate
+                  if (debateIdRef.current !== debateId) return prevMap; // Stale update check
+
+                  const currentParty = prevMap.get(baseName);
+                  // Update only if the new party info is different from the existing one
+                  if (currentParty !== fetchedParty) {
+                      const newMap = new Map(prevMap);
+                      newMap.set(baseName, fetchedParty);
+                      // console.log(`[Party Cache] Updating map for ${baseName} to ${fetchedParty}`);
+                      return newMap;
+                  }
+                  return prevMap; // No change needed
+              });
+
+          } else {
+              console.warn(`[Party Cache] API fetch failed for member ${memberId}: ${response.status}. Caching null.`);
+              // Cache null on failure to prevent repeated fetches for non-existent/erroring IDs
+              try { localStorage.setItem(cacheKey, 'null'); } catch (e) { /* ignore */ }
+          }
+      } catch (error) {
+          console.error(`[Party Cache] Network error fetching party for member ${memberId}:`, error);
+          // Cache null on network error
+          try { localStorage.setItem(cacheKey, 'null'); } catch (e) { /* ignore */ }
+      } finally {
+          currentlyFetchingParties.current.delete(memberId);
+      }
+
+      return fetchedParty;
+  }, [setSpeakerPartyMap, debateId]); // Include debateId to check for stale updates inside setter
+
+  // Effect to build/update the speaker-party map
   useEffect(() => {
-    if (rewrittenDebate?.speeches) {
-      const newMap = new Map<string, string | null>();
-      const knownParties = ['Con', 'DUP', 'Lab', 'LD', 'PC', 'UUP', 'Ind', 'SNP', 'CB'];
-      rewrittenDebate.speeches.forEach(speech => {
-        const baseName = getBaseSpeakerName(speech.speaker);
-        const potentialPartyAbbr = parsePartyAbbreviation(speech.speaker); // Use the existing parser
-        let finalPartyAbbr: string | null = null;
+    // Ensure both rewritten speeches and original data (for member IDs) are available
+    if (!rewrittenDebate?.speeches || !originalDebateData?.Items) {
+        if (speakerPartyMap.size > 0) {
+             console.log('[ChatView] Clearing Speaker-Party Map due to missing data.');
+             setSpeakerPartyMap(new Map());
+        }
+        return;
+    }
 
-        // Store the first party found/inferred for each speaker name
-        if (baseName && baseName !== 'Unknown Speaker' && !newMap.has(baseName)) {
-            // 1. Check if the parsed abbreviation is a known party
-            if (potentialPartyAbbr && knownParties.includes(potentialPartyAbbr)) {
-                finalPartyAbbr = potentialPartyAbbr;
-            } else {
-                // 2. If not a known party (or null), try inferring from title keywords
-                const lowerSpeaker = speech.speaker.toLowerCase(); // Case-insensitive check
+    const buildMap = async () => {
+        // Create a new map instance based on the current state for modification
+        const tempMap = new Map<string, string | null>(speakerPartyMap);
+        const knownParties = ['Con', 'DUP', 'Lab', 'LD', 'PC', 'UUP', 'Ind', 'SNP', 'CB'];
+        let needsStateUpdate = false; // Track if the final state needs to be set
+
+        for (const speech of rewrittenDebate.speeches) {
+            const baseName = getBaseSpeakerName(speech.speaker);
+            if (baseName === 'Unknown Speaker') continue;
+
+            // Skip if we already have a definitive party (non-null) for this speaker in the temp map
+            if (tempMap.has(baseName) && tempMap.get(baseName) !== null) {
+                continue;
+            }
+
+            let currentSpeechParty: string | null = null;
+
+            // --- Strategy --- (Refined Order)
+            // 1. Try parsing from current speech string (most direct)
+            // 2. Try localStorage via memberId (cached)
+            // 3. Try fetching via memberId (if available & not cached) -> This will update state directly, but we capture result here too
+            // 4. Try inferring from title keywords (fallback)
+
+            // 1. Parse from current speech string
+            const parsedPartyAbbr = parsePartyAbbreviation(speech.speaker);
+            if (parsedPartyAbbr && knownParties.includes(parsedPartyAbbr)) {
+                currentSpeechParty = parsedPartyAbbr;
+            }
+
+            // Find corresponding original item to get MemberId
+            const originalItem = speech.originalIndex !== undefined
+                ? originalDebateData.Items.find(item => item.OrderInSection === speech.originalIndex && item.ItemType === 'Contribution')
+                : null;
+            const memberId = originalItem?.MemberId;
+
+            // 2. & 3. Try localStorage or fetch if memberId exists AND party not found yet
+            if (memberId && currentSpeechParty === null) {
+                const partyFromCacheOrFetch = await getOrFetchParty(memberId, baseName);
+                // Use the result if it provided a party (it might return null if fetch failed or cache was explicitly null)
+                if (partyFromCacheOrFetch !== null) {
+                     currentSpeechParty = partyFromCacheOrFetch;
+                }
+                // Note: getOrFetchParty might have already updated the main state map if fetch was successful.
+                // We still check its return value here for fallback logic within this loop iteration.
+            }
+
+            // 4. Infer from title keywords if party still not found
+            if (currentSpeechParty === null) {
+                const lowerSpeaker = speech.speaker.toLowerCase();
                 if (lowerSpeaker.includes('shadow')) {
-                    finalPartyAbbr = 'Con'; // Assume Shadow = Conservative
-                    console.log(`[Party Inference] Found 'Shadow' for ${baseName}, setting party to Con`);
+                    currentSpeechParty = 'Con';
+                    // console.log(`[Party Inference] Found 'Shadow' for ${baseName}, setting party to Con`);
                 } else if (lowerSpeaker.includes('minister for') || lowerSpeaker.includes('secretary of state')) {
-                    finalPartyAbbr = 'Lab'; // Assume Minister/SoS = Labour (current gov)
+                    currentSpeechParty = 'Lab';
                     console.log(`[Party Inference] Found Gov title for ${baseName}, setting party to Lab`);
                 }
             }
 
-            // Store the abbreviation (which might be null if none was found/inferred)
-            newMap.set(baseName, finalPartyAbbr);
-        }
-      });
-
-      // Check if the map content *needs* updating (ignore if only nulls were added/changed)
-      let changed = newMap.size !== speakerPartyMap.size;
-      if (!changed) {
-        for (const [key, value] of newMap.entries()) {
-            if (speakerPartyMap.get(key) !== value) {
-                changed = true;
-                break;
+            // Update the temporary map only if the value is different or new
+            if (tempMap.get(baseName) !== currentSpeechParty) {
+                 tempMap.set(baseName, currentSpeechParty);
+                 needsStateUpdate = true; // Mark that an update happened in this iteration
             }
+        } // End loop through speeches
+
+        // Update state only if the map content has actually changed during the loop
+        // This check complements the direct state update within getOrFetchParty
+        // It ensures changes from parsing/inference also trigger a state update if needed.
+        if (needsStateUpdate) {
+             // Compare final tempMap with current state speakerPartyMap before setting
+             let mapsAreEqual = tempMap.size === speakerPartyMap.size;
+             if (mapsAreEqual) {
+                 for (const [key, value] of tempMap) {
+                     if (speakerPartyMap.get(key) !== value) {
+                         mapsAreEqual = false;
+                         break;
+                     }
+                 }
+             }
+
+             if (!mapsAreEqual) {
+                 // console.log('[ChatView] Finalizing Speaker-Party Map update:', tempMap);
+                 setSpeakerPartyMap(tempMap);
+             }
         }
-      }
+    };
 
-      // Update state only if the map content has actually changed
-      if (changed) {
-        console.log('[ChatView] Updating Speaker-Party Map:', newMap);
-        setSpeakerPartyMap(newMap);
-      }
-    }
+    buildMap();
 
-    // Clear map when debate changes (or speeches become empty)
-    if (!rewrittenDebate?.speeches || rewrittenDebate.speeches.length === 0) {
-        if (speakerPartyMap.size > 0) {
-             console.log('[ChatView] Clearing Speaker-Party Map due to empty/changed debate.');
-             setSpeakerPartyMap(new Map());
-        }
-    }
-
-  }, [rewrittenDebate?.speeches]); // Rerun only when speeches change
+  }, [rewrittenDebate?.speeches, originalDebateData?.Items, speakerPartyMap, getOrFetchParty]); // Added dependencies
 
   const renderContent = () => {
       if (!debateId) {
@@ -566,12 +727,16 @@ const ChatView = forwardRef(({
             );
           })}
        <div className="p-2 text-center text-sm">
-         {isStreaming && !isReconnecting && <p className="text-teal-400 animate-pulse">Streaming...</p>}
          {isReconnecting && <p className="text-yellow-400 animate-pulse">Reconnecting (Attempt {retryAttempt + 1}/{MAX_RETRIES + 1})...</p>}
        </div>
-       {!isStreaming && !isLoadingRewritten && rewrittenDebate.speeches?.length === 0 && (
-             <p className="text-center text-gray-500">{'No casual speeches found.'}</p>
+       {/* Show specific loading message only when streaming starts and no messages are present yet */} 
+       {!isLoadingRewritten && isStreaming && rewrittenDebate.speeches?.length === 0 && (
+             <p className="text-center text-gray-400 italic">You're the first... loading messages...</p>
            )}
+        {/* Show "No speeches found" only if not loading, not streaming, and array is empty */} 
+        {!isStreaming && !isLoadingRewritten && rewrittenDebate.speeches?.length === 0 && (
+              <p className="text-center text-gray-500">{'No casual speeches found.'}</p>
+            )}
         </>
       );
     } else { // viewMode === 'original'
@@ -633,6 +798,14 @@ const ChatView = forwardRef(({
     <div className="flex flex-col bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200">
        <div className="flex-grow overflow-y-auto p-4 space-y-4">
         {renderContent()}
+        <div className="h-8 px-4 pb-4 flex items-center">
+          {typingSpeakerInfo && (
+            <TypingIndicator
+              speakerName={typingSpeakerInfo.speaker}
+              partyAbbreviation={typingSpeakerInfo.party}
+            />
+          )}
+        </div>
         <div ref={chatEndRef} />
       </div>
     </div>

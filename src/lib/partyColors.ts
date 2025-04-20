@@ -24,19 +24,23 @@ export const parsePartyAbbreviation = (speakerName: string | null): string | nul
 export const getPartyColorClass = (partyAbbreviation: string | null): string => {
   switch (partyAbbreviation) {
     case 'Con':
+    case 'Conservative':
       return 'text-blue-400'; // Conservative
     case 'DUP':
       return 'text-orange-400'; // Democratic Unionist Party
     case 'Lab':
+    case 'Labour':
       return 'text-red-400'; // Labour
     case 'LD':
+    case 'Liberal Democrat':
       return 'text-yellow-400'; // Liberal Democrat
     case 'PC':
       return 'text-green-400'; // Plaid Cymru
     case 'UUP':
       return 'text-purple-400'; // Ulster Unionist Party
     case 'Ind':
-      return 'text-gray-400'; // Independent
+    case 'Independent':
+      return 'text-orange-800'; // Independent
     case 'SNP':
       return 'text-yellow-400'; // Scottish National Party
     case 'CB':
@@ -61,15 +65,28 @@ export const getPartyColorClassFromName = (speakerName: string | null): string =
 // Using simple Tailwind color names for now, assuming they correspond to available fills or strokes
 export const getPartySvgFill = (partyAbbreviation: string | null): string => {
   switch (partyAbbreviation) {
-    case 'Con': return '#60a5fa'; // blue-400
-    case 'DUP': return '#fb923c'; // orange-400
-    case 'Lab': return '#f87171'; // red-400
-    case 'LD': return '#facc15'; // yellow-400
-    case 'PC': return '#4ade80'; // green-400
-    case 'UUP': return '#c084fc'; // purple-400
-    case 'Ind': return '#9ca3af'; // gray-400
-    case 'SNP': return '#facc15'; // yellow-400
-    case 'CB': return '#fb923c'; // orange-400
-    default: return '#9ca3af'; // gray-400 (slightly different default for fill)
+    case 'Con':
+    case 'Conservative':
+      return '#60a5fa'; // blue-400
+    case 'DUP':
+      return '#fb923c'; // orange-400
+    case 'Lab':
+    case 'Labour':
+      return '#f87171'; // red-400
+    case 'LD':
+    case 'Liberal Democrat':
+      return '#facc15'; // yellow-400
+    case 'PC':
+      return '#4ade80'; // green-400
+    case 'UUP':
+      return '#c084fc'; // purple-400
+    case 'Ind':
+      return '#9ca3af'; // gray-400
+    case 'SNP':
+      return '#facc15'; // yellow-400
+    case 'CB':
+      return '#fb923c'; // orange-400
+    default:
+      return '#9ca3af'; // gray-400 (slightly different default for fill)
   }
 }; 

@@ -12,17 +12,26 @@ import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the 
 
 // Import types
 import { InternalDebateSummary, DebateMetadata } from '@/types';
-import { DebateResponse, DebateContentItem } from '@/lib/hansard/types'; // Import necessary types
+import { DebateResponse } from '@/lib/hansard/types'; // Import necessary types
 import { Speech } from '@/components/ChatView'; // Import Speech type
 
 // Icons for view toggle
 const CasualIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M10 2a.75.75 0 0 1 .75.75v.212c.43-.09 1.126-.162 2.008-.162 2.441 0 4.567 1.06 5.871 2.631l.124.152.162.068a.75.75 0 0 1 .64.919l-1.582 6.01a6.012 6.012 0 0 1-5.108 4.394c-.64.13-1.43.203-2.316.203-.885 0-1.676-.073-2.316-.203a6.012 6.012 0 0 1-5.108-4.394l-1.582-6.01a.75.75 0 0 1 .64-.919l.162-.068.124-.152C2.676 3.86 4.8 2.8 7.242 2.8c.882 0 1.578.073 2.008.162V2.75A.75.75 0 0 1 10 2Z" clipRule="evenodd" /></svg>;
 const OriginalIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M4.25 5.5a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" clipRule="evenodd" /></svg>;
 
+// localStorage Keys
+const METADATA_CACHE_PREFIX = 'uwhatgov_metadata_';
+const ORIGINAL_DEBATE_CACHE_PREFIX = 'uwhatgov_original_';
+
 export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const chatViewRef = useRef<{ scrollToItem: (index: number) => void }>(null); // Ref for ChatView scrolling
+
+  // Caches stored in refs/state
+  // Metadata cache uses state to trigger re-renders when items are added/updated for ChatList
+  const [metadataCache, setMetadataCache] = useState<Record<string, DebateMetadata>>({});
+  const originalDebateCache = useRef<Map<string, DebateResponse>>(new Map());
 
   // Chat List state
   const [selectedDebateId, setSelectedDebateId] = useState<string | null>(null);
@@ -54,13 +63,51 @@ export default function Home() {
   // Ref for the rewritten debate data used in search
   const rewrittenDebateRef = useRef<Speech[] | null>(null);
 
-  // Fetch Original Debate Data (Moved Up)
-  const fetchOriginalDebate = useCallback(async (debateId: string | null) => { // Allow null ID
-      if (!debateId || originalDebate || isLoadingOriginal) return;
+  // Fetch Original Debate Data (incorporates memory & localStorage caching)
+  const fetchOriginalDebate = useCallback(async (debateId: string | null) => {
+      if (!debateId) return;
 
-      console.log(`[page.tsx] Fetching ORIGINAL debate ${debateId}`);
+      // 1. Check memory cache first
+      if (originalDebateCache.current.has(debateId)) {
+          const cachedData = originalDebateCache.current.get(debateId)!;
+          console.log(`[fetchOriginalDebate] Memory Cache HIT for original debate ${debateId}`);
+          setOriginalDebate(cachedData);
+          setIsLoadingOriginal(false);
+          setErrorOriginal(null);
+          return;
+      }
+
+      // 2. Check localStorage
+      const localStorageKey = ORIGINAL_DEBATE_CACHE_PREFIX + debateId;
+      try {
+          const storedData = localStorage.getItem(localStorageKey);
+          if (storedData) {
+              const parsedData: DebateResponse = JSON.parse(storedData);
+              console.log(`[fetchOriginalDebate] localStorage HIT for original debate ${debateId}`);
+              originalDebateCache.current.set(debateId, parsedData); // Update memory cache
+              setOriginalDebate(parsedData);
+              setIsLoadingOriginal(false);
+              setErrorOriginal(null);
+              return;
+          }
+      } catch (error) {
+          console.error(`[fetchOriginalDebate] Error reading/parsing localStorage for ${debateId}:`, error);
+          // Optional: Clear the corrupted item
+          // localStorage.removeItem(localStorageKey);
+      }
+
+      // Prevent concurrent fetches if already loading (simple check)
+      if (isLoadingOriginal) {
+        console.log(`[fetchOriginalDebate] Fetch already in progress for original debate, skipping.`);
+        return;
+      }
+
+      // 3. Fetch from API
+      console.log(`[fetchOriginalDebate] Cache MISS. Fetching ORIGINAL debate ${debateId} from API`);
       setIsLoadingOriginal(true);
       setErrorOriginal(null);
+      setOriginalDebate(null); // Clear potentially stale data
+
       try {
         const hansardApiUrl = `/api/hansard/debates/${debateId}`;
         const response = await fetch(hansardApiUrl);
@@ -70,21 +117,69 @@ export default function Home() {
           throw new Error(errorMsg);
         }
         const data: DebateResponse = await response.json();
-        setOriginalDebate(data);
+        console.log(`[fetchOriginalDebate] Fetched data for ${debateId}, caching.`);
+
+        // Store in localStorage
+        try {
+            localStorage.setItem(localStorageKey, JSON.stringify(data));
+        } catch (error) {
+            console.error(`[fetchOriginalDebate] Error writing to localStorage for ${debateId}:`, error);
+        }
+
+        originalDebateCache.current.set(debateId, data); // Store in memory cache
+        setOriginalDebate(data); // Set state
+
       } catch (e: any) {
-        console.error(`[page.tsx] Failed fetch original ${debateId}:`, e);
+        console.error(`[fetchOriginalDebate] Failed fetch original ${debateId}:`, e);
         setErrorOriginal(`Failed load original: ${e.message}`);
+        setOriginalDebate(null);
       } finally {
         setIsLoadingOriginal(false);
       }
-    }, [originalDebate, isLoadingOriginal]);
+    }, [isLoadingOriginal]);
 
-  // Fetch Metadata for Selected Debate
+  // Fetch Metadata for Selected Debate (incorporates memory & localStorage caching, updates state)
   const fetchSelectedDebateMetadata = useCallback(async (debateId: string) => {
-      console.log(`[page.tsx] Fetching METADATA for debate ${debateId}`);
-      setIsLoadingMetadata(true);
-      setErrorMetadata(null);
-      setSelectedDebateMetadata(null); // Clear previous metadata
+
+      // 1. Check state cache first (instead of ref)
+      if (metadataCache[debateId]) {
+          // Data already exists in state, no need to check localStorage or fetch
+          // console.log(`[fetchMetadata] State Cache HIT for metadata ${debateId}`);
+          // We might want to ensure loading/error states are correct if they were set previously
+          if (metadataCache[debateId].isLoading || metadataCache[debateId].error) {
+             setMetadataCache(prev => ({ ...prev, [debateId]: { ...prev[debateId], isLoading: false, error: null } }));
+          }
+          return;
+      }
+
+      // 2. Check localStorage
+      const localStorageKey = METADATA_CACHE_PREFIX + debateId;
+      try {
+          const storedData = localStorage.getItem(localStorageKey);
+          if (storedData) {
+              const parsedData: DebateMetadata = JSON.parse(storedData);
+              console.log(`[fetchMetadata] localStorage HIT for metadata ${debateId}`);
+              // Update state cache directly from localStorage
+              setMetadataCache(prev => ({ ...prev, [debateId]: { ...parsedData, isLoading: false, error: null } }));
+              return;
+          }
+      } catch (error) {
+          console.error(`[fetchMetadata] Error reading/parsing localStorage for ${debateId}:`, error);
+      }
+
+      // Prevent concurrent fetches by checking loading state *within the specific item*
+      // This allows multiple different items to load concurrently
+      const currentItem = metadataCache[debateId] as DebateMetadata | undefined;
+      if (currentItem && typeof currentItem.isLoading === 'boolean' && currentItem.isLoading) {
+        console.log(`[fetchMetadata] Fetch already in progress for metadata ${debateId}, skipping.`);
+        return;
+      }
+
+      // 3. Fetch from API
+      console.log(`[fetchMetadata] Cache MISS. Fetching METADATA for debate ${debateId} from API`);
+      // Set loading state for this specific item
+      setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId] || {}), isLoading: true, error: null } }));
+
       try {
           const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
           if (!response.ok) {
@@ -92,15 +187,36 @@ export default function Home() {
               try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) { }
               throw new Error(errorMsg);
           }
-          const metadata: DebateMetadata = await response.json(); // Assuming API returns DebateMetadata directly
-          setSelectedDebateMetadata(metadata);
+          const metadata: DebateMetadata = await response.json();
+          console.log(`[fetchMetadata] Fetched data for ${debateId}, caching.`);
+
+          // Store in localStorage
+          try {
+            localStorage.setItem(localStorageKey, JSON.stringify(metadata));
+          } catch (error) {
+            console.error(`[fetchMetadata] Error writing to localStorage for ${debateId}:`, error);
+          }
+
+          // Update state cache with fetched data, clear loading/error
+          setMetadataCache(prev => ({ ...prev, [debateId]: { ...metadata, isLoading: false, error: null } }));
+
       } catch (e: any) {
-          console.error(`[page.tsx] Failed fetch metadata ${debateId}:`, e);
-          setErrorMetadata(e.message || 'Failed to load metadata');
+          console.error(`[fetchMetadata] Failed fetch metadata ${debateId}:`, e);
+          // Update state cache with error
+          setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId] || {}), isLoading: false, error: e.message || 'Failed to load metadata' } }));
       } finally {
-          setIsLoadingMetadata(false);
+           // Redundant isLoading set in try/catch, could remove this outer finally block
+           // setIsLoadingMetadata(false); // Removed global loading state dependence
       }
-  }, []);
+    // Include metadataCache in dependency array cautiously. If it causes infinite loops,
+    // we might need to use a ref inside the callback or pass the setter.
+  }, [metadataCache]);
+
+  // Callback for ChatList items becoming visible
+  const handleChatItemVisible = useCallback((debateId: string) => {
+      // console.log(`[handleChatItemVisible] Item visible: ${debateId}`);
+      fetchSelectedDebateMetadata(debateId); // Trigger fetch/cache check
+  }, [fetchSelectedDebateMetadata]);
 
   // Effect to sync selectedDebateId from URL, reset state, and fetch data
   useEffect(() => {
@@ -110,26 +226,38 @@ export default function Home() {
         // Check if the ID from URL is different from the current state
         if (debateIdFromUrl !== selectedDebateId) {
              console.log(`[useEffect] Detected ID change: ${selectedDebateId} -> ${debateIdFromUrl}`);
-             // Set the new ID
-             setSelectedDebateId(debateIdFromUrl);
+             // Check caches *before* setting state
+             let cachedMetadata: DebateMetadata | null = null;
+             if (metadataCache[debateIdFromUrl]) {
+                 cachedMetadata = metadataCache[debateIdFromUrl];
+             } else {
+                 try {
+                     const storedData = localStorage.getItem(METADATA_CACHE_PREFIX + debateIdFromUrl);
+                     if (storedData) cachedMetadata = JSON.parse(storedData);
+                 } catch (e) { console.error("Error reading initial metadata from LS", e); }
+             }
 
+             const cachedOriginal = originalDebateCache.current.get(debateIdFromUrl);
+             // ... rest of the useEffect state setting remains largely the same,
+             // but uses the pre-checked cachedMetadata
+             setSelectedDebateId(debateIdFromUrl);
+ 
              // Reset ALL other relevant states immediately
              setSelectedDebateSummary(null); // Will be updated by ChatList or fetched if needed
-             setOriginalDebate(null);
-             setIsLoadingOriginal(false);
+             setOriginalDebate(cachedOriginal || null); // Use cached data if available, otherwise null
+             setIsLoadingOriginal(!cachedOriginal); // Set loading only if not cached
              setErrorOriginal(null);
              setSelectedOriginalIndex(null);
-             setSelectedDebateMetadata(null);
-             setIsLoadingMetadata(false);
+             setSelectedDebateMetadata(cachedMetadata || null);
+             setIsLoadingMetadata(!cachedMetadata && !metadataCache[debateIdFromUrl]?.isLoading); // Set loading if not cached AND not already loading in state
              setErrorMetadata(null);
              setViewMode('rewritten');
              setSearchQuery('');
              setIsSearchOpen(false);
-             // Don't fetch here, fetch below *after* state is potentially set
         }
         // Always fetch data if a valid ID is present in the URL
         // Fetch functions have internal checks to prevent redundant calls if data exists
-        console.log(`[useEffect] Triggering fetches for ID: ${debateIdFromUrl}`);
+        console.log(`[useEffect] Ensuring data for ID: ${debateIdFromUrl} (will use cache if available)`);
         fetchOriginalDebate(debateIdFromUrl);
         fetchSelectedDebateMetadata(debateIdFromUrl);
 
@@ -153,7 +281,7 @@ export default function Home() {
     }
     // Dependencies: Run when URL changes or the selected ID state changes.
     // fetchOriginalDebate and fetchSelectedDebateMetadata are stable due to useCallback.
-  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata]);
+  }, [searchParams, selectedDebateId, fetchOriginalDebate, fetchSelectedDebateMetadata, metadataCache]);
 
   // Fetch Original Debate Data
   const fetchOriginalDebateData = useCallback(async (debateId: string | null) => {
@@ -307,6 +435,8 @@ export default function Home() {
         <ChatList
           onSelectDebate={handleSelectDebate}
           selectedDebateId={selectedDebateId}
+          allMetadata={metadataCache} // Pass down the metadata state object
+          onItemVisible={handleChatItemVisible} // Pass down the visibility callback
         />
       </div>
 
@@ -376,7 +506,8 @@ export default function Home() {
                      {/* DebateMetadataIcon */}
                      <DebateMetadataIcon
                        metadata={{ // Construct the object needed by the icon
-                         ...selectedDebateMetadata,
+                         ...(selectedDebateMetadata || {}),
+                         // Still use separate loading/error state for the selected item's header
                          isLoading: isLoadingMetadata,
                          error: errorMetadata
                        }}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useState } from "react";
 import { DebateResponse } from "@/lib/hansard/types";
 import { Speech } from "./ChatView";
-import { getPartyColorClass, getPartyColorClassFromName } from "@/lib/partyColors";
+import { getPartyColorClass } from "@/lib/partyColors";
 
 // MessageBubble component
 interface MessageBubbleProps {
@@ -177,7 +177,7 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                     {isInfoboxVisible && memberId && (
                         <div
                             ref={infoboxRef} // Add ref to the infobox itself
-                            className="absolute bottom-full left-1/2 transform mb-2 w-64 z-50 p-3 bg-[#2a3942] border border-gray-600 rounded-lg shadow-lg text-sm text-gray-200 whitespace-normal" // Increased z-index to z-50
+                            className="absolute bottom-full left-0 transform translate-y-35 mb-2 w-64 z-50 p-3 bg-[#2a3942] border border-gray-600 rounded-lg shadow-lg text-sm text-gray-200 whitespace-normal" // Increased z-index
                             onClick={(e) => e.stopPropagation()} // Prevent clicks inside infobox from closing it
                         >
                              {isLoadingInfo && <p className="text-center text-gray-400 italic">Loading...</p>}
@@ -202,7 +202,7 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                     className="inline-block relative cursor-pointer" // Added cursor-pointer
                     onClick={handleInfoboxToggle}
                  >
-                    <p className={`font-semibold text-sm mb-1 ${partyAbbreviation !== undefined ? getPartyColorClass(partyAbbreviation) : getPartyColorClassFromName(speech.speaker)} pointer-events-none`}>
+                    <p className={`font-semibold text-sm mb-1 ${getPartyColorClass(partyAbbreviation ?? null)} pointer-events-none`}>
                         <HighlightedText text={speech.speaker || 'Unknown Speaker'} query={searchQuery} />
                     </p>
                  </div>

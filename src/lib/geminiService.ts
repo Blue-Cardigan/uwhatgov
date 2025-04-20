@@ -65,14 +65,6 @@ import {
     responseSchema: fullChatResponseSchema as Schema, // Explicitly cast if needed, but ArraySchema should be assignable
   };
   
-  // --- Safety Settings ---
-  const safetySettings = [
-      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-  ];
-  
   /**
    * Takes debate transcript text and generates a structured JSON stream
    * of casual chat messages, including original index and snippet.
@@ -126,8 +118,7 @@ import {
     try {
       const result = await model.generateContentStream({
           contents: [{ role: "user", parts: [{text: prompt}]}],
-          generationConfig: structuredStreamGenerationConfig,
-          safetySettings: safetySettings
+          generationConfig: structuredStreamGenerationConfig
       });
       console.log(`[Gemini Service] Stream initiated for debate "${debateTitle}".`);
       return result; // Return the full stream result object
