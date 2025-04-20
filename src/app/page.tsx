@@ -314,45 +314,6 @@ export default function Home() {
     handleDebateSelect(debateSummary.id);
   }, [handleDebateSelect]);
 
-  // Handle Deleting a Debate (from ChatList)
-  const handleDeleteDebate = useCallback(async (debateId: string) => {
-    if (!debateId) return;
-    console.log(`[handleDeleteDebate] Attempting to delete debate: ${debateId}`);
-
-    // Optimistic UI update: Remove from metadata cache immediately
-    setMetadataCache(prev => {
-        const { [debateId]: _, ...rest } = prev;
-        return rest;
-    });
-    // If the deleted debate was selected, clear the view
-    if (selectedDebateId === debateId) {
-        handleDebateSelect(null);
-    }
-
-    try {
-        const response = await fetch(`/api/hansard/debates/rewrite/delete/${debateId}`, {
-            method: 'DELETE',
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || `Failed to delete debate: ${response.status}`);
-        }
-        console.log(`[handleDeleteDebate] Successfully deleted debate ${debateId} from backend.`);
-        // Remove from localStorage (original and metadata)
-        localStorage.removeItem(ORIGINAL_DEBATE_CACHE_PREFIX + debateId);
-        localStorage.removeItem(METADATA_CACHE_PREFIX + debateId);
-        // Note: If using a more robust cache/state management, update there too.
-
-    } catch (error: any) {
-        console.error(`[handleDeleteDebate] Failed to delete debate ${debateId}:`, error);
-        // Revert optimistic update on error?
-        // For simplicity, we currently don't revert the UI but log the error.
-        // You might want to show a notification to the user.
-        // Re-fetch metadata to potentially restore if deletion failed?
-        fetchSelectedDebateMetadata(debateId);
-    }
-  }, [selectedDebateId, handleDebateSelect, fetchSelectedDebateMetadata]); // Added dependencies
-
   // Effect to update selectedDebateMetadata state when the cache changes for the selected ID
   useEffect(() => {
     if (selectedDebateId && metadataCache[selectedDebateId]) {
@@ -458,7 +419,6 @@ export default function Home() {
           <ChatList
             selectedDebateId={selectedDebateId}
             onSelectDebate={handleSelectDebateFromList}
-            onDeleteDebate={handleDeleteDebate}
             allMetadata={metadataCache}
             fetchMetadata={fetchSelectedDebateMetadata}
           />
