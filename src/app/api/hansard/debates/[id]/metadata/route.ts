@@ -20,12 +20,14 @@ function parseHrsTag(hrsTag: string | null): string {
         case 'hs_3cMainHdg': return 'Generic Topic';
         case 'hs_8Petition': return 'Petition';
         case 'hs_2cBillTitle': return 'Bill Reading';
+        case 'BigBoldHdg': return 'Bold Header';
         default:
             console.warn(`[API Metadata] Unmapped HRSTag: ${hrsTag}`);
             // Attempt to make a generic name from the tag
             return hrsTag
-                .replace(/^hs_\d+[a-zA-Z]?/, '') // Remove prefix like hs_2c
+                .replace(/^hs_\d+[a-z]?/, '') // Remove prefix like hs_2c
                 .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+                .replace(' Hdg', '')
                 .trim() || 'Unknown Type';
     }
 }

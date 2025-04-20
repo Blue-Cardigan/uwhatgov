@@ -5,12 +5,15 @@ import { InternalDebateSummary, DebateMetadata } from '@/types';
 // Import Hansard API types
 import { SearchResult, DebateSummary } from '@/lib/hansard/types';
 import DebateMetadataIcon from './DebateMetadataIcon'; // Import the new icon component
-import { DebateMetadataResponse } from '@/app/api/hansard/debates/[debateId]/metadata/route'; // Import response type
+import { DebateMetadataResponse } from '@/app/api/hansard/debates/[id]/metadata/route'; // Import response type
 
 interface ChatListProps {
   onSelectDebate: (debateSummary: InternalDebateSummary) => void;
   selectedDebateId: string | null;
 }
+
+// Helper to get today's date in YYYY-MM-DD format
+const getTodayDateString = () => new Date().toISOString().split('T')[0];
 
 export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListProps) {
   const [debates, setDebates] = useState<InternalDebateSummary[]>([]);
@@ -24,6 +27,12 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
   const observedItemsRef = useRef<Map<string, IntersectionObserverEntry>>(new Map());
   const observerRef = useRef<IntersectionObserver | null>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
+  // --- Filter State ---
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
+  const [houseFilter, setHouseFilter] = useState(''); // 'Commons', 'Lords', or '' for both
+  const [isSearchActive, setIsSearchActive] = useState(false); // Track if search/filters are active
 
   // Helper to format date string
   const formatDate = (isoDateString: string) => {
@@ -130,56 +139,85 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     fetchLastSittingDate();
   }, []);
 
-  // Fetch initial debates when lastSittingDate is available
+  // Fetch initial debates (only when lastSittingDate is available and no search is active)
   useEffect(() => {
-    if (lastSittingDate && !oldestDateLoaded) {
+    if (lastSittingDate && !oldestDateLoaded && !isSearchActive) {
       fetchDebates(lastSittingDate);
     }
-  }, [lastSittingDate, fetchDebates, oldestDateLoaded]);
+  }, [lastSittingDate, fetchDebates, oldestDateLoaded, isSearchActive]);
 
-  // --- Search Functionality (Clears existing debates) ---
-  const handleSearch = (event: React.FormEvent) => {
-    event.preventDefault();
-    console.log('Searching for:', searchTerm);
-    setDebates([]); // Clear existing debates on new search
-    setOldestDateLoaded(null); // Reset oldest date on new search
-    setCanLoadMore(false); // Disable loading more during search results view
-    const searchUrl = `/api/hansard/search?query=${encodeURIComponent(searchTerm)}`;
-    // Re-use fetchDebates structure but don't append, replace.
-    // Or create a dedicated search fetch function?
-    // For now, let's modify fetchDebates slightly or adapt the logic here.
+  // --- Search Functionality (Uses searchTerm and filters) ---
+  const handleSearch = useCallback(async (event?: React.FormEvent) => {
+    if (event) event.preventDefault(); // Prevent form submission if triggered by event
 
-    // Simplified search fetch (replaces, doesn't use pagination date)
-    const searchFetch = async () => {
-        setIsLoading(true);
-        setError(null);
-        console.log(`Fetching search results from: ${searchUrl}`);
-        try {
-            const response = await fetch(searchUrl);
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('Hansard API Search Error Response:', errorText);
-                throw new Error(`HTTP error! status: ${response.status} - ${errorText.substring(0, 100)}`);
-            }
-            const data: SearchResult = await response.json();
-            const mappedDebates: InternalDebateSummary[] = data.Debates.map((debate: DebateSummary) => ({
-                id: debate.DebateSectionExtId,
-                title: debate.Title || debate.DebateSection,
-                date: formatDate(debate.SittingDate),
-                house: debate.House,
-            }));
-            setDebates(mappedDebates);
-            setMetadataCache({}); // Clear metadata on new search
-        } catch (e: any) {
-            console.error(`Failed to fetch search results from ${searchUrl}:`, e);
-            setError(`Search failed: ${e.message}`);
-            setMetadataCache({}); // Clear metadata on new search
-        } finally {
-            setIsLoading(false);
+    // Only search if there's a term or filters are applied
+    if (!searchTerm && !startDateFilter && !endDateFilter && !houseFilter) {
+        // If clearing search/filters, reset to default view (latest debates)
+        setIsSearchActive(false);
+        setDebates([]);
+        setOldestDateLoaded(null);
+        setCanLoadMore(true);
+        setMetadataCache({});
+        // Trigger fetch for the last sitting date if available
+        if (lastSittingDate) {
+            fetchDebates(lastSittingDate);
         }
-    };
-    searchFetch();
-  };
+        return;
+    }
+
+
+    console.log('Searching with criteria:', { searchTerm, startDateFilter, endDateFilter, houseFilter });
+    setIsSearchActive(true); // Mark search as active
+    setDebates([]); // Clear existing debates
+    setOldestDateLoaded(null); // Reset pagination marker
+    setCanLoadMore(false); // Disable pagination during filtered search
+    setIsLoading(true);
+    setError(null);
+    setMetadataCache({}); // Clear metadata on new search
+
+    // Construct search query parameters
+    const params = new URLSearchParams();
+    if (searchTerm) params.append('searchTerm', searchTerm);
+    if (startDateFilter) params.append('startDate', startDateFilter);
+    if (endDateFilter) params.append('endDate', endDateFilter);
+    if (houseFilter) params.append('house', houseFilter);
+    // Add pagination params if needed in future search enhancements?
+    // params.append('skip', '0');
+    // params.append('take', '20'); // Example pagination
+
+    const searchUrl = `/api/hansard/search?${params.toString()}`;
+
+    console.log(`Fetching search results from: ${searchUrl}`);
+    try {
+        const response = await fetch(searchUrl);
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Hansard API Search Error Response:', errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText.substring(0, 100)}`);
+        }
+        const data: SearchResult = await response.json();
+        const mappedDebates: InternalDebateSummary[] = data.Debates.map((debate: DebateSummary) => ({
+            id: debate.DebateSectionExtId,
+            title: debate.Title || debate.DebateSection,
+            date: formatDate(debate.SittingDate),
+            house: debate.House,
+        }));
+        // Sort search results by date descending (most recent first)
+        setDebates(mappedDebates.sort((a, b) => b.date.localeCompare(a.date)));
+
+        // Determine if more search results *might* exist - API doesn't directly tell us
+        // Heuristic: If we got results, assume there *could* be more for now.
+        // A proper API would provide total count or pagination info.
+        // For now, search results are not paginated further after the initial fetch.
+        // setCanLoadMore(mappedDebates.length > 0); // Revisit pagination for search results later
+
+    } catch (e: any) {
+        console.error(`Failed to fetch search results from ${searchUrl}:`, e);
+        setError(`Search failed: ${e.message}`);
+    } finally {
+        setIsLoading(false);
+    }
+  }, [searchTerm, startDateFilter, endDateFilter, houseFilter, fetchDebates, lastSittingDate]); // Add filters and fetchDebates dependency
 
   // --- Pagination --- Get previous day in YYYY-MM-DD format
   const getPreviousDay = (dateString: string): string => {
@@ -201,7 +239,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     const observer = new IntersectionObserver(
       (entries) => {
         // Check if the target is intersecting and we are not loading, can load more, and not in search mode
-        if (entries[0].isIntersecting && !isLoading && canLoadMore && !searchTerm) {
+        if (entries[0].isIntersecting && !isLoading && canLoadMore && !isSearchActive) {
           console.log('Sentinel visible, loading previous day...');
           handleLoadPreviousDay();
         }
@@ -222,7 +260,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
     };
     // Re-run observer setup if loading state, ability to load more, or search term changes
     // Also depends on handleLoadPreviousDay potentially changing if its deps change
-  }, [isLoading, canLoadMore, handleLoadPreviousDay, searchTerm]);
+  }, [isLoading, canLoadMore, handleLoadPreviousDay, isSearchActive]); // Use isSearchActive instead of searchTerm
 
   // Use a single observer for all items
   useEffect(() => {
@@ -277,17 +315,77 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
 
   return (
     <div className="flex flex-col h-full bg-[#111b21]">
-      {/* Search Bar */}
-      <div className="p-2 bg-[#202c33]">
-        <form onSubmit={handleSearch} className="flex gap-2">
+      {/* Search Bar & Filters */}
+      <div className="p-3 bg-[#202c33] border-b border-gray-700">
+        <form onSubmit={handleSearch} className="flex flex-col gap-2">
+          {/* Keyword Search */}
           <input
             type="text"
-            placeholder="Search debates..."
+            placeholder="Search debates (keywords)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className="w-full p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
-          {/* Consider adding a search icon button */}
+          {/* Filters Row */}
+          <div className="flex flex-wrap gap-2 items-center">
+             {/* House Filter */}
+             <select
+                value={houseFilter}
+                onChange={(e) => setHouseFilter(e.target.value)}
+                className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer"
+             >
+                <option value="">Any House</option>
+                <option value="Commons">Commons</option>
+                <option value="Lords">Lords</option>
+             </select>
+             {/* Date Filters */}
+             <div className="flex gap-2 items-center text-sm text-gray-400">
+               <span>From:</span>
+               <input
+                 type="date"
+                 value={startDateFilter}
+                 onChange={(e) => setStartDateFilter(e.target.value)}
+                 className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                 // max={endDateFilter || getTodayDateString()} // Optional: prevent start date after end date
+                 max={getTodayDateString()} // Prevent future dates
+               />
+               <span>To:</span>
+               <input
+                 type="date"
+                 value={endDateFilter}
+                 onChange={(e) => setEndDateFilter(e.target.value)}
+                 className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                 min={startDateFilter} // Optional: prevent end date before start date
+                 max={getTodayDateString()} // Prevent future dates
+               />
+             </div>
+             {/* Search/Clear Button */}
+             <button
+                type="submit"
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-md disabled:opacity-50 transition-colors"
+                disabled={isLoading}
+             >
+               {isLoading ? 'Searching...' : 'Search'}
+             </button>
+              {/* Optional: Clear Filters Button */}
+              {(searchTerm || startDateFilter || endDateFilter || houseFilter) && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        setSearchTerm('');
+                        setStartDateFilter('');
+                        setEndDateFilter('');
+                        setHouseFilter('');
+                        // Trigger handleSearch without event to reset view
+                        handleSearch();
+                    }}
+                    className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm"
+                    title="Clear search and filters"
+                 >
+                    Clear
+                 </button>
+              )}
+          </div>
         </form>
       </div>
 
@@ -329,9 +427,9 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
                      </span>
                   </div>
                   {/* Uncomment if you want to show the match snippet in the list */}
-                  {/* {debate.match && (
+                  {debate.match && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 italic truncate">...{debate.match}...</p>
-                  )} */}
+                  )}
                 </div>
               </div>
           );
@@ -340,8 +438,8 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
         {/* Loading More Indicator (at the bottom) */}
         {isLoading && debates.length > 0 && <p className="p-4 text-center text-gray-400">Loading more...</p>}
 
-        {/* Load More Button */}
-        {!isLoading && !error && canLoadMore && debates.length > 0 && (
+        {/* Load More Button - Only show if not searching/filtering */}
+        {!isLoading && !error && canLoadMore && debates.length > 0 && !isSearchActive && (
           <div className="p-4 text-center">
             <button
               onClick={handleLoadPreviousDay}
@@ -353,8 +451,8 @@ export default function ChatList({ onSelectDebate, selectedDebateId }: ChatListP
           </div>
         )}
 
-        {/* Sentinel Element for Intersection Observer */}
-        {!isLoading && canLoadMore && !searchTerm && debates.length > 0 && (
+        {/* Sentinel Element for Intersection Observer - Only enable when not searching/filtering */}
+        {!isLoading && canLoadMore && !isSearchActive && debates.length > 0 && (
            <div ref={observerTarget} style={{ height: '1px' }} />
         )}
 

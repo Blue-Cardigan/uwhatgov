@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Resizable } from 're-resizable'; // Import Resizable
 
@@ -12,10 +12,17 @@ import OriginalContribution from '@/components/OriginalContribution'; // Import 
 // Import types
 import { InternalDebateSummary } from '@/types';
 import { DebateResponse, DebateContentItem } from '@/lib/hansard/types'; // Import necessary types
+import { Speech } from '@/components/ChatView'; // Import Speech type
+
+// Helper function for escaping regex characters
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&'); // $& means the whole matched string
+}
 
 export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const chatViewRef = useRef<{ scrollToItem: (index: number) => void }>(null); // Ref for ChatView scrolling
 
   // Chat List state
   const [selectedDebateId, setSelectedDebateId] = useState<string | null>(null);
@@ -32,6 +39,14 @@ export default function Home() {
   // Resizable Panel state
   const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null); // Moved from ChatView
   const [originalPanelHeight, setOriginalPanelHeight] = useState(192); // Moved from ChatView, default height (12rem)
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<number[]>([]); // Stores indices (OrderInSection) of matches
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(-1); // Index within searchResults array
+
+  // Ref for the rewritten debate data used in search
+  const rewrittenDebateRef = useRef<Speech[] | null>(null);
 
   // Fetch Original Debate Data (Moved Up)
   const fetchOriginalDebate = useCallback(async (debateId: string | null) => { // Allow null ID
@@ -97,6 +112,79 @@ export default function Home() {
     }
   }, [originalDebate, isLoadingOriginal]);
 
+  // --- SEARCH LOGIC ---
+  useEffect(() => {
+    // Perform search whenever query, viewMode, or data changes
+    if (searchQuery.trim() === '') {
+      setSearchResults([]);
+      setCurrentMatchIndex(-1);
+      return;
+    }
+
+    const query = searchQuery.trim().toLowerCase();
+    let results: number[] = [];
+
+    if (viewMode === 'rewritten') {
+        const speeches = rewrittenDebateRef.current; // Use ref for current speeches
+        if (speeches) {
+            results = speeches
+                .map((speech, index) => ({ speech, originalIndex: speech.originalIndex ?? index })) // Use originalIndex if available, fallback to array index
+                .filter(item => item.speech.text.toLowerCase().includes(query) || item.speech.speaker.toLowerCase().includes(query))
+                .map(item => item.originalIndex); // Store the original index
+        }
+    } else { // viewMode === 'original'
+      if (originalDebate?.Items) {
+        results = originalDebate.Items
+          .filter(item =>
+            item.ItemType === 'Contribution' &&
+            item.Value &&
+            (item.Value.toLowerCase().includes(query) || (item.AttributedTo && item.AttributedTo.toLowerCase().includes(query)))
+          )
+          .map(item => item.OrderInSection); // Store OrderInSection
+      }
+    }
+
+    console.log(`Search for "${query}" in ${viewMode} mode found ${results.length} results:`, results);
+    setSearchResults(results);
+    setCurrentMatchIndex(results.length > 0 ? 0 : -1);
+
+  }, [searchQuery, viewMode, originalDebate, rewrittenDebateRef]); // Added rewrittenDebateRef dependency
+
+  // Effect to scroll to the current match
+  useEffect(() => {
+      if (currentMatchIndex !== -1 && searchResults.length > 0) {
+          const targetIndex = searchResults[currentMatchIndex];
+          console.log(`Scrolling to search result index: ${targetIndex} (result ${currentMatchIndex + 1} of ${searchResults.length})`);
+          chatViewRef.current?.scrollToItem(targetIndex);
+      }
+  }, [currentMatchIndex, searchResults]);
+
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
+  };
+
+  const goToNextMatch = () => {
+    if (searchResults.length > 0) {
+      setCurrentMatchIndex((prevIndex) => (prevIndex + 1) % searchResults.length);
+    }
+  };
+
+  const goToPreviousMatch = () => {
+    if (searchResults.length > 0) {
+      setCurrentMatchIndex((prevIndex) => (prevIndex - 1 + searchResults.length) % searchResults.length);
+    }
+  };
+
+  // Clear search when debate changes or view mode switches
+  useEffect(() => {
+      setSearchQuery('');
+      setSearchResults([]);
+      setCurrentMatchIndex(-1);
+  }, [selectedDebateId, viewMode]);
+
+  // --- END SEARCH LOGIC ---
+
   // Handle selecting a debate from the list
   const handleSelectDebate = useCallback((debate: InternalDebateSummary) => {
     console.log(`Debate selected: ${debate.id} - Title: ${debate.title}`);
@@ -140,10 +228,13 @@ export default function Home() {
       ? originalDebate.Items.find(item => item.OrderInSection === selectedOriginalIndex)
       : null;
 
+  // Calculate the index of the currently highlighted search result
+  const highlightedIndex = currentMatchIndex !== -1 ? searchResults[currentMatchIndex] : null;
+
   return (
     <main className="flex h-screen w-screen bg-[#111b21] text-white overflow-hidden relative">
       {/* Sidebar */}
-      <div className="w-full md:w-1/3 lg:w-1/4 border-r border-gray-700 flex flex-col bg-[#111b21]">
+      <div className="w-full md:w-2/5 lg:w-1/4 border-r border-gray-700 flex flex-col bg-[#111b21]">
         <ChatList
           onSelectDebate={handleSelectDebate}
           selectedDebateId={selectedDebateId}
@@ -173,9 +264,35 @@ export default function Home() {
                     <button onClick={() => handleToggle('rewritten')} className={`px-3 py-1 rounded-md text-xs sm:text-sm transition-colors ${viewMode === 'rewritten' ? 'bg-teal-600 text-white' : 'bg-transparent text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`} disabled={!selectedDebateId}>Casual</button>
                     <button onClick={() => handleToggle('original')} className={`px-3 py-1 rounded-md text-xs sm:text-sm transition-colors ${viewMode === 'original' ? 'bg-teal-600 text-white' : 'bg-transparent text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`} disabled={!selectedDebateId}>Original</button>
                </div>
-               {/* Right Icons */}
-               <div className="flex gap-4 text-gray-400 flex-shrink-0">
-                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 cursor-pointer hover:text-gray-200"><path fillRule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM2.25 10.5a8.25 8.25 0 1 1 14.59 5.28l4.69 4.69a.75.75 0 1 1-1.06 1.06l-4.69-4.69A8.25 8.25 0 0 1 2.25 10.5Z" clipRule="evenodd" /></svg>
+               {/* Right Icons & Search */}
+               <div className="flex items-center gap-2 text-gray-400 flex-shrink-0">
+                 {/* Search Input and Controls */}
+                 <div className="flex items-center bg-[#2a3942] rounded-md px-2 py-1">
+                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500 mr-1 flex-shrink-0"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
+                   <input
+                     type="text"
+                     placeholder="Search debate..."
+                     value={searchQuery}
+                     onChange={handleSearchChange}
+                     className="bg-transparent text-sm text-gray-200 placeholder-gray-500 focus:outline-none w-24 sm:w-32 md:w-40"
+                     disabled={!selectedDebateId}
+                   />
+                   {searchQuery && (
+                     <button onClick={() => setSearchQuery('')} className="ml-1 text-gray-500 hover:text-gray-300 text-xs p-0.5">&times;</button>
+                   )}
+                   {searchResults.length > 0 && (
+                     <span className="text-xs text-gray-500 ml-2 whitespace-nowrap">
+                       {currentMatchIndex + 1}/{searchResults.length}
+                     </span>
+                   )}
+                   <button onClick={goToPreviousMatch} disabled={searchResults.length <= 1} className="ml-1 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M14.77 12.79a.75.75 0 0 1-1.06 0L10 9.06l-3.71 3.73a.75.75 0 1 1-1.06-1.06l4.24-4.25a.75.75 0 0 1 1.06 0l4.24 4.25a.75.75 0 0 1 0 1.06Z" clipRule="evenodd" /></svg> {/* Up Arrow */}
+                   </button>
+                   <button onClick={goToNextMatch} disabled={searchResults.length <= 1} className="ml-0.5 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" /></svg> {/* Down Arrow */}
+                   </button>
+                 </div>
+                 {/* Existing More Options Icon */}
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 cursor-pointer hover:text-gray-200"><path fillRule="evenodd" d="M10.5 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm0 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm0 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Z" clipRule="evenodd" /></svg>
                </div>
             </header>
@@ -183,14 +300,22 @@ export default function Home() {
             {/* ChatView Wrapper (handles scrolling) */}
             <div className="flex-1 overflow-y-auto">
               <ChatView
+                ref={chatViewRef} // Assign ref
                 debateId={selectedDebateId}
                 viewMode={viewMode}
                 originalDebateData={originalDebate}
                 isLoadingOriginal={isLoadingOriginal}
                 errorOriginal={errorOriginal}
                 fetchOriginalDebate={() => fetchOriginalDebate(selectedDebateId)} // Pass fetch function
-                selectedOriginalIndex={selectedOriginalIndex} // Pass state down
+                selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
                 onBubbleClick={handleBubbleClick} // Pass handler down
+                searchQuery={searchQuery} // Pass search query
+                highlightedIndex={highlightedIndex} // Pass highlighted item's index
+                onRewrittenDebateUpdate={(speeches) => { // Callback to get current rewritten speeches
+                    rewrittenDebateRef.current = speeches;
+                    // Optionally trigger search re-run if needed during streaming,
+                    // but current useEffect handles data changes already.
+                }}
               />
             </div>
 
