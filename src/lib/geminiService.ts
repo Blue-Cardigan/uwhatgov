@@ -2,13 +2,20 @@ import {
     GoogleGenerativeAI,
     HarmCategory,
     HarmBlockThreshold,
-    GenerateContentStreamResult, // Import stream result type
-    SchemaType, // Import the SchemaType enum
-    // Import specific schema types
+    GenerateContentStreamResult,
+    SchemaType,
     ObjectSchema,
     ArraySchema,
-    Schema // Base type if needed
+    Schema
   } from '@google/generative-ai';
+  
+  // Interface for the chat message structure
+  interface ChatMessage {
+    speaker: string;
+    text: string;
+    originalIndex: number;
+    originalSnippet: string;
+  }
   
   const MODEL_NAME = "gemini-1.5-flash";
   const API_KEY = process.env.GOOGLE_API_KEY; // Ensure this is set in your Vercel env vars
@@ -42,14 +49,12 @@ import {
         description: "A short snippet (max 15 words) from the beginning of the original text."
       },
     },
-    // This array should now be assignable to string[]
     required: ["speaker", "text", "originalIndex", "originalSnippet"],
   };
   
   // --- Schema for the Top-Level Array (Explicitly Typed) ---
   const fullChatResponseSchema: ArraySchema = {
       type: SchemaType.ARRAY,
-      // The items property expects a Schema type
       items: chatMessageSchema, 
       description: "An array of chat message objects representing the rewritten debate."
   };
@@ -60,13 +65,57 @@ import {
     topK: 1,
     topP: 1,
     responseMimeType: "application/json",
-    // responseSchema expects type Schema | undefined
-    responseSchema: fullChatResponseSchema as Schema, // Explicitly cast if needed, but ArraySchema should be assignable
+    responseSchema: fullChatResponseSchema as Schema,
   };
+  
+  /**
+   * Combines consecutive messages from the same speaker into a single message.
+   * 
+   * @param {ChatMessage[]} messages - Array of chat messages to process
+   * @returns {ChatMessage[]} Array of combined messages
+   */
+  export function combineConsecutiveSpeakerMessages(messages: ChatMessage[]): ChatMessage[] {
+    if (!messages || messages.length <= 1) return messages;
+    
+    const combinedMessages: ChatMessage[] = [];
+    let currentMessage: ChatMessage | null = null;
+    
+    for (const message of messages) {
+      // If this is the first message or speaker has changed
+      if (!currentMessage || currentMessage.speaker !== message.speaker) {
+        // Add the previous message group to our result if it exists
+        if (currentMessage) {
+          combinedMessages.push(currentMessage);
+        }
+        
+        // Start a new message group
+        currentMessage = {...message};
+      } else {
+        // Same speaker, combine the text
+        currentMessage.text += "\n\n" + message.text;
+        
+        // Keep track of all included original indexes (optional)
+        // We could track these in an array if needed, but for now
+        // we'll use the earliest index as the reference point
+        currentMessage.originalIndex = Math.min(currentMessage.originalIndex, message.originalIndex);
+        
+        // Keep original snippet from the first message
+        // (we already have it from when we cloned the first message)
+      }
+    }
+    
+    // Don't forget to add the last message group
+    if (currentMessage) {
+      combinedMessages.push(currentMessage);
+    }
+    
+    return combinedMessages;
+  }
   
   /**
    * Takes debate transcript text and generates a structured JSON stream
    * of casual chat messages, including original index and snippet.
+   * Consecutive messages from the same speaker are combined.
    *
    * @param {string} relevantDebateText - The text of the debate segments to process.
    * @param {string} debateTitle - The title of the debate.
@@ -85,7 +134,7 @@ import {
     }
     if (!relevantDebateText) {
       console.warn("Cannot generate chat stream for empty text.");
-      return null; // Or throw? Returning null seems safer for the caller.
+      return null;
     }
   
     // Prompt asking for an array, referencing original index
@@ -120,15 +169,44 @@ import {
           generationConfig: structuredStreamGenerationConfig
       });
       console.log(`[Gemini Service] Stream initiated for debate "${debateTitle}".`);
-      return result; // Return the full stream result object
+      return result;
   
     } catch (error: any) {
       console.error(`[Gemini Service] Error initiating stream for debate "${debateTitle}":`, error);
-      // Rethrow or handle more gracefully depending on desired caller behavior
       throw new Error(`Gemini API Error: ${error.message || 'Unknown error'}`);
     }
   }
-
+  
+  /**
+   * Process a completed Gemini response and combine consecutive messages from the same speaker.
+   * 
+   * @param {any} response - The complete response from Gemini 
+   * @returns {ChatMessage[]} The processed messages with combined consecutive speaker contributions
+   */
+  export function processDebateResponse(response: any): ChatMessage[] {
+    try {
+      // Parse the JSON string if it's a string
+      let messages: ChatMessage[];
+      if (typeof response === 'string') {
+        messages = JSON.parse(response);
+      } else if (Array.isArray(response)) {
+        messages = response;
+      } else {
+        console.error("[Gemini Service] Invalid response format:", response);
+        throw new Error("Invalid response format from Gemini API");
+      }
+      
+      // Combine consecutive messages from the same speaker
+      const combinedMessages = combineConsecutiveSpeakerMessages(messages);
+      console.log(`[Gemini Service] Combined ${messages.length} messages into ${combinedMessages.length} messages`);
+      
+      return combinedMessages;
+    } catch (error: any) {
+      console.error("[Gemini Service] Error processing debate response:", error);
+      throw new Error(`Error processing debate response: ${error.message || 'Unknown error'}`);
+    }
+  }
+  
   // --- Configuration for Plain Text Generation (Summary) ---
   const textGenerationConfig = {
       temperature: 0.6, // Slightly lower temp for more focused summary
@@ -138,7 +216,7 @@ import {
       responseMimeType: "text/plain", // Expecting plain text
   }; 
   
-  // --- Safety Settings (Reuse from above) ---
+  // --- Safety Settings ---
   const safetySettings = [
       { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
       { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -170,20 +248,20 @@ import {
   
     // Prompt for summarization
     const prompt = `
-You are an AI assistant tasked with summarizing a parliamentary debate transcript.
-
-**Task:** Generate a concise, neutral summary (around 2-3 sentences) of the key points discussed in the following debate transcript.
-Focus on the main arguments or topics raised.
-
-**Debate Title:** ${debateTitle || 'Untitled Debate'}
-
-**Debate Transcript:**
---- START TRANSCRIPT ---
-${relevantDebateText}
---- END TRANSCRIPT ---
-
-**Concise Summary (2-3 sentences):**
-`;
+  You are an AI assistant tasked with summarizing a parliamentary debate transcript.
+  
+  **Task:** Generate a concise, neutral summary (around 2-3 sentences) of the key points discussed in the following debate transcript.
+  Focus on the main arguments or topics raised.
+  
+  **Debate Title:** ${debateTitle || 'Untitled Debate'}
+  
+  **Debate Transcript:**
+  --- START TRANSCRIPT ---
+  ${relevantDebateText}
+  --- END TRANSCRIPT ---
+  
+  **Concise Summary (2-3 sentences):**
+  `;
   
     console.log(`[Gemini Service] Requesting summary for debate "${debateTitle}"`);
   
@@ -199,7 +277,6 @@ ${relevantDebateText}
   
       if (!summaryText) {
            console.warn(`[Gemini Service] Summary generation returned empty text for "${debateTitle}".`);
-           // Fallback or throw? Let's return a placeholder for now.
            return "Summary could not be generated.";
       }
   
@@ -209,12 +286,10 @@ ${relevantDebateText}
     } catch (error: any) {
       console.error(`[Gemini Service] Error generating summary for debate "${debateTitle}":`, error);
   
-       // Check for safety blocks specifically
        if (error.response && error.response.promptFeedback?.blockReason) {
            console.warn(`[Gemini Service] Summary generation blocked due to safety settings: ${error.response.promptFeedback.blockReason}`);
            return `Summary generation blocked due to safety settings (${error.response.promptFeedback.blockReason}).`;
        }
-      // Rethrow or handle more gracefully depending on desired caller behavior
       throw new Error(`Gemini API Error during summary generation: ${error.message || 'Unknown error'}`);
     }
   }
