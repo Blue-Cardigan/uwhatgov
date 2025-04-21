@@ -27,7 +27,7 @@ const getStripe = () => {
 };
 
 const BillingPage = () => {
-  const { isProUser, loadingSubscription, user } = useAuth();
+  const { isProUser, loadingSubscription } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -563,8 +563,10 @@ export async function GET() {
 
     return NextResponse.json(responseData);
 
-  } catch (error: any) {
-    console.error('Dashboard API Error:', error.message, error.stack);
-    return NextResponse.json({ error: error.message || 'An internal server error occurred' }, { status: 500 });
+  } catch (_e) {
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
   }
 } 

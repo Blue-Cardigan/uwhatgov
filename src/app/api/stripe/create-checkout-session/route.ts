@@ -11,7 +11,7 @@ const proPriceId = process.env.STRIPE_PRO_PLAN_PRICE_ID!;
 // Use the server-side environment variable without NEXT_PUBLIC_ prefix
 const baseUrl = process.env.BASE_URL!;
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   // Create Supabase client for App Router Route Handler
   const supabase = createClient();
 

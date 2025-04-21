@@ -151,6 +151,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const cleanupPromise = initializeAuthAndSubscription();
 
     return () => { cleanupPromise.then(cleanup => cleanup?.()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   const logout = async () => {
