@@ -508,7 +508,7 @@ export default function Home() {
                    <div className="flex items-center gap-3 min-w-0 flex-1"> {/* Added flex-1 */}
                      {/* Back Button (Mobile Only) */}
                      <button
-                        onClick={() => router.push('/', { scroll: false })} // Use router to clear query param and trigger state reset
+                        onClick={() => handleDebateSelect(null)}
                         className="md:hidden mr-1 p-1 text-gray-400 hover:text-white"
                         aria-label="Back to chat list"
                       >
