@@ -3,7 +3,13 @@ import type { Database } from '@/lib/database.types'; // Adjust path as needed
 import { createClient } from '@/lib/supabase/server'; // Import the server client utility
 
 // Define the structure expected within the 'content' JSON field
-// Based on the example SQL INSERT provided
+// Includes title and speeches array
+interface DebateContent {
+  title: string;
+  speeches: SpeechContent[];
+}
+
+// Define structure for individual speeches within content
 interface SpeechContent {
   originalIndex: number;
   speaker: string;
@@ -11,10 +17,12 @@ interface SpeechContent {
   originalSnippet?: string; // Optional based on example
 }
 
-interface DebateContent {
-  title: string;
-  speeches: SpeechContent[];
-}
+// Type for fetched debate metadata (used before full parsing)
+type FetchedDebateData = {
+  id: string;
+  content: string | null; // Keep content string for later parsing if needed
+  summary: string | null;
+};
 
 // User-specific Reaction type
 type UserReaction = Database['public']['Tables']['reactions_uwhatgov']['Row'] & {
@@ -111,6 +119,24 @@ const getStartDate = (period: 'daily' | 'weekly' | 'monthly'): Date => {
     return now;
 };
 
+// Helper function to safely parse JSON and extract title/speeches
+const parseDebateContent = (contentString: string | null, debateId: string): { title: string; speeches: SpeechContent[] } => {
+    if (!contentString) {
+        // console.warn(`No content string provided for debate ${debateId}`);
+        return { title: `Debate ID: ${debateId}`, speeches: [] };
+    }
+    try {
+        const parsed = JSON.parse(contentString) as Partial<DebateContent>;
+        const title = typeof parsed.title === 'string' ? parsed.title : `Content Error: ${debateId}`;
+        const speeches = Array.isArray(parsed.speeches) ? parsed.speeches : [];
+        // Basic validation for speeches structure could be added here if needed
+        return { title, speeches };
+    } catch (e) {
+        // console.error(`Error parsing content JSON for debate ${debateId}:`, e);
+        return { title: `Content Error: ${debateId}`, speeches: [] };
+    }
+};
+
 export async function GET() {
   const supabase = createClient();
 
@@ -134,35 +160,43 @@ export async function GET() {
     // === Fetch Data ===
 
     // 1. Fetch User Subscription Status (to determine if Pro)
-    const isProUser = true;
-    // try {
-    //     const { data: subscriptionData, error: subscriptionError } = await supabase
-    //         .from('subscriptions')
-    //         .select('status, current_period_end')
-    //         .eq('user_id', userId)
-    //         .in('status', ['active', 'trialing']) // Active or trialing counts as "pro"
-    //         .order('created_at', { ascending: false })
-    //         .limit(1)
-    //         .single(); // Expect only one relevant subscription
+    let isProUser = false; // Default to false
+    try {
+        const { data: subscriptionData, error: subscriptionError } = await supabase
+            .from('subscriptions')
+            .select('status, current_period_end')
+            .eq('user_id', userId)
+            .in('status', ['active', 'trialing']) // Active or trialing counts as "pro"
+            .order('current_period_end', { ascending: false, nullsFirst: false }) // Get the latest relevant one
+            .limit(1)
+            .maybeSingle(); // Handles 0 or 1 result gracefully
 
-    //     if (subscriptionError && subscriptionError.code !== 'PGRST116') { // Ignore 'No rows found' error
-    //         console.error('Error fetching subscription:', subscriptionError);
-    //         // Decide if this should block the request or just default to non-pro
-    //     }
+        // Log potential errors, but don't throw if it's just 'No rows found' (PGRST116)
+        // or 'Range not satisfiable' (also indicates no rows found often)
+        if (subscriptionError && subscriptionError.code !== 'PGRST116') {
+            console.error('Dashboard API: Error fetching subscription:', subscriptionError);
+            // Fallback: User remains non-pro. Consider if specific errors should block.
+        } else if (subscriptionData) {
+            // Check if the subscription is active/trialing and hasn't passed its end date
+            const now = new Date();
+            // Ensure current_period_end is treated as a string before creating a Date
+            const endDateStr = subscriptionData.current_period_end;
+            const endDate = endDateStr ? new Date(endDateStr) : null;
 
-    //     if (subscriptionData) {
-    //         // Check if the subscription is active/trialing and hasn't passed its end date
-    //         const now = new Date();
-    //         const endDate = subscriptionData.current_period_end ? new Date(subscriptionData.current_period_end) : null;
-    //         if (endDate && endDate > now) {
-    //             isProUser = true;
-    //         } else if (!endDate) { // Handle cases where end date might be null for perpetual trials/active states?
-    //              isProUser = true; // Assuming null end date means active indefinitely for now
-    //         }
-    //     }
-    // } catch (subError) {
-    //     console.error("Error processing subscription data:", subError);
-    // }
+            // If endDate exists, it must be in the future. If it doesn't exist (e.g. lifetime?), consider it active.
+            if (!endDate || endDate > now) {
+                isProUser = true;
+                console.log(`Dashboard API: User ${userId} identified as Pro. Status: ${subscriptionData.status}, End Date: ${endDateStr}`);
+            } else {
+                 console.log(`Dashboard API: User ${userId} subscription found but expired. Status: ${subscriptionData.status}, End Date: ${endDateStr}`);
+            }
+        } else {
+             console.log(`Dashboard API: No active/trialing subscription found for user ${userId}.`);
+        }
+    } catch (subError) {
+        console.error("Dashboard API: Unexpected error processing subscription data:", subError);
+        // Fallback: User remains non-pro on unexpected errors.
+    }
 
     // 2. Fetch ALL Reactions (Consider adding date range filter later for performance)
     const { data: allReactionsData, error: allReactionsError } = await supabase
@@ -182,52 +216,30 @@ export async function GET() {
     // Recalculate count based on filtered list
     const userTotalReactionsCount = allReactions.filter(r => r.user_id === userId).length;
 
-    // 3. Fetch Debate Content for ALL relevant debates
-    const debateContentMap = new Map<string, DebateContent>();
-    const allDebateIds = [...new Set(allReactions.map(r => r.debate_id))];
+    // 3. Fetch *ALL* Debate Metadata (ID, Content, Summary)
+    const { data: allDebatesMetadata, error: debatesError } = await supabase
+        .from('casual_debates_uwhatgov')
+        .select('id, content, summary'); // Fetch necessary fields
 
-    // Define debatesData type here to make it available later
-    type FetchedDebateData = { id: string; content: string | null; summary: string | null; };
-    let debatesData: FetchedDebateData[] | null = null;
-
-    // Fetch Debate Content (assign to the declared variable)
-    if (allDebateIds.length > 0) {
-        const { data: fetchedData, error: debatesError } = await supabase
-            .from('casual_debates_uwhatgov')
-            .select('id, content, summary')
-            .in('id', allDebateIds);
-
-        if (debatesError) {
-            console.error('Error fetching debate content:', debatesError);
-        } else {
-            debatesData = fetchedData; // Assign fetched data
-            // Populate the content map (moved parsing here)
-            debatesData?.forEach(d => {
-                if (d.id && d.content) {
-                    try {
-                        const parsedContent = JSON.parse(d.content) as DebateContent;
-                        if (parsedContent && typeof parsedContent.title === 'string' && Array.isArray(parsedContent.speeches)) {
-                            debateContentMap.set(d.id, parsedContent);
-                        } else {
-                            // console.warn(`Parsed content for debate ${d.id} has unexpected structure.`);
-                            debateContentMap.set(d.id, { title: 'Content Error', speeches: [] });
-                        }
-                    } catch (_parseError) {
-                        // console.error(`Error parsing content JSON for debate ${d.id}:`, parseError);
-                        debateContentMap.set(d.id, { title: 'Content Error', speeches: [] });
-                    }
-                }
-            });
-        }
+    if (debatesError) {
+        console.error('Error fetching all debate metadata:', debatesError);
+        // Decide how to handle: return error or proceed with empty/partial data?
+        // Returning error for now, as debates are crucial for Pro features.
+        return NextResponse.json({ error: 'Failed to fetch debate metadata' }, { status: 500 });
     }
+    const allFetchedDebates: FetchedDebateData[] = allDebatesMetadata || [];
 
-    // 4. Fetch Member Data (Names for mapping) - Fetch potentially relevant members
-    // This is inefficient; a better approach might involve a function or optimized query
-    // For now, fetch members who might appear as speakers
+    // 4. Create Map for Quick Lookup of Debate Content/Summary by ID
+    const debateMetadataMap = new Map<string, FetchedDebateData>();
+    allFetchedDebates.forEach(d => {
+        debateMetadataMap.set(d.id, d);
+    });
+
+    // 5. Fetch Member Data (Remains the same)
     const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select('member_id, display_as, party')
-        .in('house', ['Commons', 'Lords']); // Fetch MPs and Lords
+      .from('members')
+      .select('member_id, display_as, party')
+      .in('house', ['Commons', 'Lords']); // Fetch MPs and Lords
 
     if (membersError) {
         console.error('Error fetching members:', membersError);
@@ -243,12 +255,15 @@ export async function GET() {
     // === Process Data ===
 
     // --- User Specific Data Processing ---
+    // Now requires parsing content from the map
     const userReactionsWithDetails: UserReaction[] = userBaseReactions.map(r => {
-        const debateContent = debateContentMap.get(r.debate_id);
-        const speech = debateContent?.speeches.find(s => s.originalIndex === r.speech_original_index);
+        const debateMeta = debateMetadataMap.get(r.debate_id);
+        const { title, speeches } = parseDebateContent(debateMeta?.content ?? null, r.debate_id); // Use helper
+        const speech = speeches.find(s => s.originalIndex === r.speech_original_index);
+
         return {
             ...r,
-            debate_title: debateContent?.title || `Debate ID: ${r.debate_id}`, // Provide fallback title
+            debate_title: title, // Use parsed title
             speaker: speech?.speaker,
             text: speech?.text,
         };
@@ -289,32 +304,42 @@ export async function GET() {
     // --- Global & Pro Data Processing ---
 
     const speakerReactionCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
-    const speechReactionCounts: { [speechId: string]: { total: number, emojis: { [emoji: string]: number }, details: { debateId: string, speechIndex: number } } } = {};
     const globalTrendMap = new Map<string, { [emoji: string]: number }>();
     const uniqueEmojis = new Set<string>();
 
     // --- Pro Feature: Date Filters ---
     const dailyStartDate = getStartDate('daily');
     const weeklyStartDate = getStartDate('weekly');
-    const monthlyStartDate = getStartDate('monthly'); // Added monthly start date
+    const monthlyStartDate = getStartDate('monthly');
 
     const dailySpeakerCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
     const weeklySpeakerCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
-    const monthlySpeakerCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } } = {}; // Added monthly
+    const monthlySpeakerCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
 
-    // New: Aggregate reactions per debate ID for different timeframes
+    // Aggregate reactions per debate ID for different timeframes
     const dailyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
     const weeklyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
-    const monthlyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {}; // Added monthly
+    const monthlyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
 
+    // --- Process ALL Reactions ---
+    // Populate speaker counts, global trends, and timed debate/speaker counts
     allReactions.forEach(reaction => {
-        const debateContent = debateContentMap.get(reaction.debate_id);
-        const speech = debateContent?.speeches.find(s => s.originalIndex === reaction.speech_original_index);
-        const speakerName = speech?.speaker;
-        const speechId = `${reaction.debate_id}-${reaction.speech_original_index}`; // Still useful for potential future features?
-        const debateId = reaction.debate_id; // Get the debate ID
+        const debateMeta = debateMetadataMap.get(reaction.debate_id);
+        // Parse content *only if needed* to find the speaker
+        let speakerName: string | undefined = undefined;
+        if (debateMeta?.content) {
+            // Minimal parsing just to find the relevant speech/speaker?
+            // For now, full parse via helper is simpler, accept performance hit.
+            const { speeches } = parseDebateContent(debateMeta.content, reaction.debate_id);
+            const speech = speeches.find(s => s.originalIndex === reaction.speech_original_index);
+            speakerName = speech?.speaker;
+        } else {
+            // console.warn(`No debate content found for reaction on debate ${reaction.debate_id}`);
+        }
+
+        const debateId = reaction.debate_id;
         const reactionDate = new Date(reaction.created_at);
-        const emoji = reaction.emoji; // Moved emoji definition up
+        const emoji = reaction.emoji;
 
         // --- All Time Speaker Counts (for overall mostReactedMPs) ---
         if (speakerName) {
@@ -323,26 +348,16 @@ export async function GET() {
             speakerReactionCounts[speakerName].emojis[emoji] = (speakerReactionCounts[speakerName].emojis[emoji] || 0) + 1;
         }
 
-        // --- All Time Speech Counts (could be used later, less direct need now) ---
-        if (debateContent && speech) {
-             if (!speechReactionCounts[speechId]) speechReactionCounts[speechId] = { total: 0, emojis: {}, details: { debateId: reaction.debate_id, speechIndex: reaction.speech_original_index } };
-             speechReactionCounts[speechId].total += 1;
-             speechReactionCounts[speechId].emojis[emoji] = (speechReactionCounts[speechId].emojis[emoji] || 0) + 1;
-        }
-
         // --- Global Trends & Available Emojis ---
         const date = reaction.created_at.split('T')[0];
-        // const emoji = reaction.emoji; // Already defined above
         uniqueEmojis.add(emoji);
-
         if (!globalTrendMap.has(date)) {
             globalTrendMap.set(date, {});
         }
-        const dailyCounts = globalTrendMap.get(date)!;
-        dailyCounts[emoji] = (dailyCounts[emoji] || 0) + 1;
+        const dailyGlobalCounts = globalTrendMap.get(date)!;
+        dailyGlobalCounts[emoji] = (dailyGlobalCounts[emoji] || 0) + 1;
 
-
-        // --- Pro Feature: Daily/Weekly/Monthly Counts ---
+        // --- Pro Feature: Daily/Weekly/Monthly Counts --- (Aggregating reactions)
         // Daily Counts
         if (reactionDate >= dailyStartDate) {
             if (speakerName) { // Aggregate Speaker Counts
@@ -362,7 +377,7 @@ export async function GET() {
                 weeklySpeakerCounts[speakerName].total += 1;
                 weeklySpeakerCounts[speakerName].emojis[emoji] = (weeklySpeakerCounts[speakerName].emojis[emoji] || 0) + 1;
             }
-            // Aggregate Debate Counts
+             // Aggregate Debate Counts
              if (!weeklyDebateCounts[debateId]) weeklyDebateCounts[debateId] = { total: 0, emojis: {} };
              weeklyDebateCounts[debateId].total += 1;
              weeklyDebateCounts[debateId].emojis[emoji] = (weeklyDebateCounts[debateId].emojis[emoji] || 0) + 1;
@@ -399,18 +414,41 @@ export async function GET() {
     });
 
     // --- Prepare Pro Features Data ---
+    // This function now needs the full list of debates and the parsed title/summary map
     const processProData = (
-        speakerCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } },
-        debateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } }, // Changed from speechCounts
-        fetchedDebatesData: FetchedDebateData[] | null // Use the declared type
-    ): { speakers: MPReactionStat[], debates: RankedDebate[] } => { // Changed return type field name
+        debateCountsForPeriod: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } },
+        speakerCountsForPeriod: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } },
+        allDebatesList: FetchedDebateData[], // Pass the full list fetched earlier
+        membersInfoMap: Map<string, Pick<MemberRow, 'member_id' | 'party'>>,
+        // No longer need debateContentMap here, use allDebatesList
+    ): { speakers: MPReactionStat[], debates: RankedDebate[] } => {
 
-        const sortedProSpeakers = Object.entries(speakerCounts)
+        // 1. Process Debates: Iterate over ALL debates, add counts, then sort
+        const allDebatesWithCounts: RankedDebate[] = allDebatesList.map(debate => {
+            const counts = debateCountsForPeriod[debate.id];
+            // Use the already fetched summary; parse title from content string
+            const { title } = parseDebateContent(debate.content, debate.id);
+
+            return {
+                debateId: debate.id,
+                title: title, // Use parsed title
+                summary: debate.summary || undefined,
+                reactionCount: counts?.total || 0, // Default to 0 if no reactions in period
+                reactionsByEmoji: counts?.emojis || {}, // Default to empty object
+                link: `/?debateId=${debate.id}`,
+            };
+        });
+
+        // Sort the complete list by reaction count
+        const popularDebates = allDebatesWithCounts.sort((a, b) => b.reactionCount - a.reactionCount);
+
+        // 2. Process Speakers (Existing logic is okay)
+        const sortedProSpeakers = Object.entries(speakerCountsForPeriod)
             .sort(([, countA], [, countB]) => countB.total - countA.total)
-            .slice(0, 20); // Limit Pro results slightly more?
+            .slice(0, 50); // Keep a reasonable limit
 
         const popularSpeakers: MPReactionStat[] = sortedProSpeakers.map(([name, counts]) => {
-             const memberInfo = membersMap.get(name.toLowerCase());
+             const memberInfo = membersInfoMap.get(name.toLowerCase());
              return {
                  speakerName: name,
                  reactionCount: counts.total,
@@ -421,33 +459,13 @@ export async function GET() {
              };
         });
 
-        // Process Ranked Debates
-        const sortedProDebates = Object.entries(debateCounts) // Changed from speechCounts
-            .sort(([, countA], [, countB]) => countB.total - countA.total)
-            .slice(0, 20); // Limit Pro results
-
-        const popularDebates: RankedDebate[] = sortedProDebates.map(([debateId, counts]) => { // Changed variable name and iteration logic
-            const debateContent = debateContentMap.get(debateId);
-            // Find the original debate data that includes the summary
-            const originalDebateData = fetchedDebatesData?.find(d => d.id === debateId); // Use passed data
-
-            return {
-                debateId: debateId,
-                title: debateContent?.title || `Debate ID: ${debateId}`, // Get debate title
-                summary: originalDebateData?.summary || undefined, // Add the summary, fallback to undefined
-                reactionCount: counts.total,
-                reactionsByEmoji: counts.emojis,
-                link: `/?debateId=${debateId}`, // Link to the debate page
-            };
-        });
-
-        return { speakers: popularSpeakers, debates: popularDebates }; // Changed field name
+        return { speakers: popularSpeakers, debates: popularDebates };
     };
 
-    // Generate daily, weekly, and monthly pro data
-    const { speakers: popularSpeakersDaily, debates: popularDebatesDaily } = processProData(dailySpeakerCounts, dailyDebateCounts, debatesData);
-    const { speakers: popularSpeakersWeekly, debates: popularDebatesWeekly } = processProData(weeklySpeakerCounts, weeklyDebateCounts, debatesData);
-    const { speakers: popularSpeakersMonthly, debates: popularDebatesMonthly } = processProData(monthlySpeakerCounts, monthlyDebateCounts, debatesData); // Added monthly
+    // Generate daily, weekly, and monthly pro data using ALL debates
+    const { speakers: popularSpeakersDaily, debates: popularDebatesDaily } = processProData(dailyDebateCounts, dailySpeakerCounts, allFetchedDebates, membersMap);
+    const { speakers: popularSpeakersWeekly, debates: popularDebatesWeekly } = processProData(weeklyDebateCounts, weeklySpeakerCounts, allFetchedDebates, membersMap);
+    const { speakers: popularSpeakersMonthly, debates: popularDebatesMonthly } = processProData(monthlyDebateCounts, monthlySpeakerCounts, allFetchedDebates, membersMap);
 
     // --- Prepare Global Reaction Trends (Existing) ---
     const sortedDates = Array.from(globalTrendMap.keys()).sort();
@@ -472,19 +490,19 @@ export async function GET() {
       userStats: userStats,
       userTotalReactions: userTotalReactionsCount,
       userReactionTrend: userReactionTrend,
-      mostReactedMPs: mostReactedMPs, // All-time stats remain
+      mostReactedMPs: mostReactedMPs,
       globalReactionTrends: globalReactionTrends,
       emojiColors: emojiColors,
       // --- Pro Data ---
       isProUser: isProUser,
       availableEmojis: Array.from(uniqueEmojis).sort(),
-      // Update response fields
+      // Update response fields with potentially larger lists (including 0-reaction debates)
       popularDebatesDaily: popularDebatesDaily,
       popularDebatesWeekly: popularDebatesWeekly,
-      popularDebatesMonthly: popularDebatesMonthly, // Added monthly
+      popularDebatesMonthly: popularDebatesMonthly,
       popularSpeakersDaily: popularSpeakersDaily,
       popularSpeakersWeekly: popularSpeakersWeekly,
-      popularSpeakersMonthly: popularSpeakersMonthly, // Added monthly
+      popularSpeakersMonthly: popularSpeakersMonthly,
     };
 
     return NextResponse.json(responseData);

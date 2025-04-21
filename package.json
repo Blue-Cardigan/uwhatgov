@@ -10,18 +10,22 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
+    "@stripe/stripe-js": "^4.1.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.4",
     "@vercel/analytics": "^1.5.0",
     "axios": "^1.8.4",
     "cors": "^2.8.5",
+    "micro": "^10.0.1",
     "next": "15.3.1",
     "openai": "^4.95.1",
     "re-resizable": "^6.11.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-infinite-scroll-component": "^6.1.0",
-    "recharts": "^2.15.3"
+    "recharts": "^2.15.3",
+    "stripe": "^18.0.0",
+    "upgrade": "^1.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

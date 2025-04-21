@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
@@ -172,55 +172,53 @@ const exportToCSV = (
     }
 };
 
+const ITEMS_PER_PAGE = 10; // Define items per page for pagination
+
 export default function DashboardPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isProUser: authIsProUser, loadingSubscription } = useAuth();
   const router = useRouter();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [trendViewMode, setTrendViewMode] = useState<TrendViewMode>('user'); // State for trend toggle
+  const [trendViewMode, setTrendViewMode] = useState<TrendViewMode>('user');
 
   // --- Pro Feature State ---
-  const [isProUser, setIsProUser] = useState(true); // TODO: Get this from API/Auth
   const [proTimeframe, setProTimeframe] = useState<ProTimeframe>('weekly');
-  const [proFilterMode, setProFilterMode] = useState<ProFilterMode>('debate'); // Default to 'debate'
-  const [proEmojiFilter, setProEmojiFilter] = useState<string | null>(null); // null for all, or specific emoji
-  const [showOnlyReacted, setShowOnlyReacted] = useState(true); // Filter for >0 reactions
+  const [proFilterMode, setProFilterMode] = useState<ProFilterMode>('debate');
+  const [proEmojiFilter, setProEmojiFilter] = useState<string | null>(null);
+  const [showOnlyReacted, setShowOnlyReacted] = useState(false); // Default to showing all
+  const [debateCurrentPage, setDebateCurrentPage] = useState(1); // Pagination state for debates
+  const [speakerCurrentPage, setSpeakerCurrentPage] = useState(1); // Pagination state for speakers
 
   useEffect(() => {
-    // Redirect if not logged in after auth check
-    if (!authLoading && !user) {
-      router.push('/'); // Redirect to home or a login page
+    // Redirect if not logged in after auth check is complete
+    if (!authLoading && !loadingSubscription && !user) {
+      router.push('/');
       return;
     }
 
-    // Fetch data only if logged in
-    if (user) {
+    // Fetch data only if logged in and auth/subscription status is loaded
+    if (user && !authLoading && !loadingSubscription) {
       const fetchData = async () => {
         setIsLoading(true);
         setError(null);
         try {
-
           const response = await fetch('/api/dashboard');
           if (!response.ok) {
-             const errorData = await response.json().catch(() => ({})); // Try to parse error
-             throw new Error(errorData.error || `Failed to fetch dashboard data: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Failed to fetch dashboard data: ${response.status}`);
           }
           const data: DashboardData = await response.json();
           setDashboardData(data);
-          // Set isProUser based on data.isProUser if provided by API, default to false
-          setIsProUser(data.isProUser ?? false);
-
         } catch (err: any) {
           setError(err.message || 'An error occurred');
         } finally {
           setIsLoading(false);
         }
       };
-
       fetchData();
     }
-  }, [user, authLoading, router]);
+  }, [user, authLoading, loadingSubscription, router]);
 
   // Determine which trend data and emojis to display based on mode
   const trendDataToShow = trendViewMode === 'user' ? dashboardData?.userReactionTrend : dashboardData?.globalReactionTrends;
@@ -228,44 +226,67 @@ export default function DashboardPage() {
     ? Object.keys(trendDataToShow[0]).filter(key => key !== 'date')
     : [];
 
-  // --- Filter Logic for Pro Features ---
-  const getFilteredProData = () => {
-    if (!dashboardData) return { debates: [], speakers: [] }; // Changed from summaries
+  // --- Filter Logic for Pro Features (using useMemo for optimization) ---
+  const { filteredDebates, filteredSpeakers } = useMemo(() => {
+    if (!dashboardData) return { filteredDebates: [], filteredSpeakers: [] };
+
+    let baseDebates: RankedDebate[] = [];
+    let baseSpeakers: MPReactionStat[] = [];
 
     // Select data based on timeframe
-    let debates: RankedDebate[] = [];
-    let speakers: MPReactionStat[] = [];
-
     if (proTimeframe === 'daily') {
-      debates = dashboardData.popularDebatesDaily || [];
-      speakers = dashboardData.popularSpeakersDaily || [];
+      baseDebates = dashboardData.popularDebatesDaily || [];
+      baseSpeakers = dashboardData.popularSpeakersDaily || [];
     } else if (proTimeframe === 'weekly') {
-      debates = dashboardData.popularDebatesWeekly || [];
-      speakers = dashboardData.popularSpeakersWeekly || [];
+      baseDebates = dashboardData.popularDebatesWeekly || [];
+      baseSpeakers = dashboardData.popularSpeakersWeekly || [];
     } else { // monthly
-      debates = dashboardData.popularDebatesMonthly || [];
-      speakers = dashboardData.popularSpeakersMonthly || [];
+      baseDebates = dashboardData.popularDebatesMonthly || [];
+      baseSpeakers = dashboardData.popularSpeakersMonthly || [];
     }
 
-    // Apply reaction count filter (>0)
+    // Apply filters
+    let debates = baseDebates;
+    let speakers = baseSpeakers;
+
+    // Apply reaction count filter (>0) ONLY IF showOnlyReacted is true
     if (showOnlyReacted) {
-      debates = debates.filter(d => d.reactionCount > 0); // Changed from s
+      debates = debates.filter(d => d.reactionCount > 0);
       speakers = speakers.filter(mp => mp.reactionCount > 0);
     }
 
     // Apply specific emoji filter
     if (proEmojiFilter) {
-      debates = debates.filter(d => d.reactionsByEmoji && d.reactionsByEmoji[proEmojiFilter] > 0); // Changed from s
-      speakers = speakers.filter(mp => mp.reactionsByEmoji && mp.reactionsByEmoji[proEmojiFilter] > 0);
+      // Ensure reactionsByEmoji exists before filtering
+      debates = debates.filter(d => d.reactionsByEmoji && (d.reactionsByEmoji[proEmojiFilter] ?? 0) > 0);
+      speakers = speakers.filter(mp => mp.reactionsByEmoji && (mp.reactionsByEmoji[proEmojiFilter] ?? 0) > 0);
     }
 
-    return { debates, speakers }; // Changed from summaries
-  };
-
-  const { debates: filteredDebates, speakers: filteredSpeakers } = getFilteredProData(); // Changed from summaries
+    return { filteredDebates: debates, filteredSpeakers: speakers };
+  }, [dashboardData, proTimeframe, proEmojiFilter, showOnlyReacted]);
   // --- End Filter Logic ---
 
-  if (authLoading || isLoading) {
+  // --- Pagination Calculation ---
+  // Debates
+  const debateStartIndex = (debateCurrentPage - 1) * ITEMS_PER_PAGE;
+  const debateEndIndex = debateStartIndex + ITEMS_PER_PAGE;
+  const paginatedDebates = filteredDebates.slice(debateStartIndex, debateEndIndex);
+  const totalDebatePages = Math.ceil(filteredDebates.length / ITEMS_PER_PAGE);
+
+  // Speakers
+  const speakerStartIndex = (speakerCurrentPage - 1) * ITEMS_PER_PAGE;
+  const speakerEndIndex = speakerStartIndex + ITEMS_PER_PAGE;
+  const paginatedSpeakers = filteredSpeakers.slice(speakerStartIndex, speakerEndIndex);
+  const totalSpeakerPages = Math.ceil(filteredSpeakers.length / ITEMS_PER_PAGE);
+  // --- End Pagination Calculation ---
+
+  // Reset page number when filters change
+  useEffect(() => {
+    setDebateCurrentPage(1);
+    setSpeakerCurrentPage(1);
+  }, [proTimeframe, proFilterMode, proEmojiFilter, showOnlyReacted]);
+
+  if (authLoading || isLoading || loadingSubscription) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#111b21] text-white">
         Loading Dashboard...
@@ -289,6 +310,9 @@ export default function DashboardPage() {
     return null;
   }
 
+  // Use isProUser from context now
+  const isPro = authIsProUser;
+
   // Helper function for button styles (reusable)
   const getButtonClass = (isActive: boolean) => {
     return `px-3 py-1 rounded-md text-xs sm:text-sm font-medium transition-colors ${isActive
@@ -297,12 +321,21 @@ export default function DashboardPage() {
       }`;
   };
 
+  // Helper function for pagination button styles
+  const getPaginationButtonClass = (disabled: boolean) => {
+     return `px-3 py-1 rounded-md text-xs font-medium transition-colors border ${
+       disabled
+         ? 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed'
+         : 'bg-[#2a3942] text-gray-300 hover:bg-[#32434e] border-gray-600'
+     }`;
+   };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200 p-4 sm:p-8">
       <header className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center">
         <h1 className="text-3xl font-semibold text-white mb-2 sm:mb-0">Dashboard</h1>
-        {/* Pro Badge - Conditionally render if actually Pro */}
-        {isProUser && (
+        {/* Pro Badge - Conditionally render based on context */}
+        {isPro && (
           <span className="order-first sm:order-none mb-2 sm:mb-0 sm:ml-4 inline-block bg-yellow-500 text-yellow-900 text-xs font-bold px-2 py-0.5 rounded-full">
             PRO
           </span>
@@ -439,13 +472,13 @@ export default function DashboardPage() {
       </div>
 
       {/* --- Pro Features Section --- */}
-      {isProUser && (
+      {isPro && (
         <section className="mt-12 p-4 sm:p-6 bg-[#2a3942] rounded-lg shadow-xl border border-yellow-500/30">
            <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-yellow-400 border-b border-yellow-500/50 pb-2 flex items-center gap-2">
              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-6 h-6">
                <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z" clipRule="evenodd" />
              </svg>
-             Pro Insights: Popularity Rankings
+             Pro Insights: Debates & Speakers
            </h2>
 
            {/* Filter Controls */}
@@ -490,14 +523,17 @@ export default function DashboardPage() {
                  onChange={(e) => setShowOnlyReacted(e.target.checked)}
                  className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500 focus:ring-offset-gray-800 focus:ring-2"
                />
-               <label htmlFor="showOnlyReacted" className="ml-2 text-sm font-medium text-gray-300">Show only items with reactions {proEmojiFilter ? `(${proEmojiFilter})` : ''}</label>
+               <label htmlFor="showOnlyReacted" className="ml-2 text-sm font-medium text-gray-300">
+                 Show only items with reactions {proEmojiFilter ? `(${proEmojiFilter})` : ''}
+               </label>
              </div>
 
              {/* Export Button */}
              <div className="ml-auto">
                  <button
                    onClick={() => exportToCSV(
-                       proFilterMode === 'debate' ? filteredDebates : filteredSpeakers, // Changed from summary
+                       // Pass the *filtered* but *unpaginated* data to export
+                       proFilterMode === 'debate' ? filteredDebates : filteredSpeakers,
                        proFilterMode,
                        proTimeframe,
                        dashboardData?.availableEmojis
@@ -515,28 +551,64 @@ export default function DashboardPage() {
 
 
            {/* Display Area */}
-           <div className="grid grid-cols-1 gap-6"> {/* Could be grid-cols-2 later */}
-             {proFilterMode === 'debate' && ( // Changed from 'summary'
+           <div className="grid grid-cols-1 gap-6"> {/* Single column layout for now */}
+             {proFilterMode === 'debate' && (
                <div>
                  <h3 className="text-lg font-semibold text-gray-100 mb-3">
-                   Popular Debates ({proTimeframe}) {proEmojiFilter ? ` reacting with ${proEmojiFilter}` : ''}
+                   Debates ({proTimeframe}) {proEmojiFilter ? `reacting with ${proEmojiFilter}` : ''}
+                   {showOnlyReacted ? ' with reactions' : ''}
                  </h3>
-                 {filteredDebates.length > 0 ? ( // Changed from filteredSummaries
-                   <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 styled-scrollbar">
-                     {filteredDebates.map((debate, index) => ( // Changed from summary
-                       <div key={debate.debateId} className="bg-[#202c33] p-3 rounded-md shadow">
-                         <p className="text-sm font-medium text-white mb-1">
-                           {index + 1}. {debate.title}
-                           <span className="text-xs ml-2 text-gray-400">({debate.reactionCount} total reactions)</span>
-                         </p>
-                         {/* Display Summary if available */}
-                         {debate.summary && (
-                           <p className="text-xs text-gray-300 italic mb-1">"{debate.summary}"</p>
-                         )}
-                         {debate.link && <Link href={debate.link} className="text-xs text-indigo-400 hover:underline mt-1 inline-block">View Debate &rarr;</Link>}
-                       </div>
-                     ))}
-                   </div>
+                 {paginatedDebates.length > 0 ? (
+                   <>
+                     <div className="space-y-3 mb-4"> {/* Removed max-height/overflow */}
+                       {paginatedDebates.map((debate, index) => (
+                         <div key={debate.debateId} className="bg-[#202c33] p-3 rounded-md shadow">
+                           <p className="text-sm font-medium text-white mb-1">
+                             {debateStartIndex + index + 1}. {debate.title}
+                             <span className="text-xs ml-2 text-gray-400">({debate.reactionCount} total reactions)</span>
+                           </p>
+                           {/* Display Summary if available */}
+                           {debate.summary && (
+                             <p className="text-xs text-gray-300 italic mb-1">"{debate.summary}"</p>
+                           )}
+                           {/* Display Reaction Breakdown */}
+                           <div className="flex flex-wrap gap-x-1.5 gap-y-1 mt-1">
+                               {debate.reactionsByEmoji && Object.entries(debate.reactionsByEmoji)
+                                 .filter(([, count]) => count > 0)
+                                 .sort(([, countA], [, countB]) => countB - countA)
+                                 .map(([emoji, count]) => (
+                                    <span key={emoji} className={`text-xs px-1 py-0.5 rounded ${proEmojiFilter === emoji ? 'bg-indigo-500 text-white font-bold' : 'bg-gray-600 text-gray-200'}`}>
+                                       {emoji} {count}
+                                   </span>
+                               ))}
+                           </div>
+                           {debate.link && <Link href={debate.link} className="text-xs text-indigo-400 hover:underline mt-1.5 inline-block">View Debate &rarr;</Link>}
+                         </div>
+                       ))}
+                     </div>
+                     {/* Pagination Controls */}
+                     {totalDebatePages > 1 && (
+                         <div className="flex justify-between items-center mt-4">
+                           <button
+                             onClick={() => setDebateCurrentPage(prev => Math.max(prev - 1, 1))}
+                             disabled={debateCurrentPage === 1}
+                             className={getPaginationButtonClass(debateCurrentPage === 1)}
+                           >
+                             &larr; Previous
+                           </button>
+                           <span className="text-sm text-gray-400">
+                             Page {debateCurrentPage} of {totalDebatePages}
+                           </span>
+                           <button
+                             onClick={() => setDebateCurrentPage(prev => Math.min(prev + 1, totalDebatePages))}
+                             disabled={debateCurrentPage === totalDebatePages}
+                             className={getPaginationButtonClass(debateCurrentPage === totalDebatePages)}
+                           >
+                             Next &rarr;
+                           </button>
+                         </div>
+                      )}
+                   </>
                  ) : (
                    <p className="text-gray-400 text-sm">No debates match the current filters.</p>
                  )}
@@ -546,32 +618,55 @@ export default function DashboardPage() {
              {proFilterMode === 'speaker' && (
                <div>
                  <h3 className="text-lg font-semibold text-gray-100 mb-3">
-                   Popular Speakers ({proTimeframe}) {proEmojiFilter ? ` reacting with ${proEmojiFilter}` : ''}
+                   Speakers ({proTimeframe}) {proEmojiFilter ? `reacting with ${proEmojiFilter}` : ''}
                   </h3>
-                 {filteredSpeakers.length > 0 ? (
-                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 styled-scrollbar">
-                     {filteredSpeakers.map((speaker, index) => (
-                       <div key={speaker.speakerName + index} className="bg-[#202c33] p-3 rounded-md shadow">
-                          <p className="text-sm font-medium text-white mb-1">
-                            {index + 1}. {speaker.displayAs || speaker.speakerName}
-                            {speaker.party && <span className="text-xs ml-1.5 px-1 py-0.5 rounded bg-gray-600">{speaker.party}</span>}
-                            <span className="text-xs ml-2 text-gray-400">({speaker.reactionCount} total reactions)</span>
-                          </p>
-                          {/* Show breakdown by emoji */}
-                         <div className="flex flex-wrap gap-x-2 gap-y-1">
-                             {speaker.reactionsByEmoji && Object.entries(speaker.reactionsByEmoji)
-                               .filter(([, count]) => count > 0)
-                               .sort(([, countA], [, countB]) => countB - countA)
-                               .map(([emoji, count]) => (
-                                  <span key={emoji} className={`text-xs px-1.5 py-0.5 rounded ${proEmojiFilter === emoji ? 'bg-indigo-500 text-white font-bold' : 'bg-gray-600 text-gray-200'}`}>
-                                     {emoji} {count}
-                                 </span>
-                             ))}
+                 {paginatedSpeakers.length > 0 ? (
+                    <>
+                      <div className="space-y-3 mb-4"> {/* Removed max-height/overflow */}
+                       {paginatedSpeakers.map((speaker, index) => (
+                         <div key={speaker.speakerName + index} className="bg-[#202c33] p-3 rounded-md shadow">
+                            <p className="text-sm font-medium text-white mb-1">
+                              {speakerStartIndex + index + 1}. {speaker.displayAs || speaker.speakerName}
+                              {speaker.party && <span className="text-xs ml-1.5 px-1 py-0.5 rounded bg-gray-600">{speaker.party}</span>}
+                              <span className="text-xs ml-2 text-gray-400">({speaker.reactionCount} total reactions)</span>
+                            </p>
+                            {/* Show breakdown by emoji */}
+                           <div className="flex flex-wrap gap-x-1.5 gap-y-1 mt-1">
+                               {speaker.reactionsByEmoji && Object.entries(speaker.reactionsByEmoji)
+                                 .filter(([, count]) => count > 0)
+                                 .sort(([, countA], [, countB]) => countB - countA)
+                                 .map(([emoji, count]) => (
+                                    <span key={emoji} className={`text-xs px-1 py-0.5 rounded ${proEmojiFilter === emoji ? 'bg-indigo-500 text-white font-bold' : 'bg-gray-600 text-gray-200'}`}>
+                                       {emoji} {count}
+                                   </span>
+                               ))}
+                           </div>
                          </div>
-                           {/* Optional: Link to speaker profile page if available */}
-                       </div>
-                     ))}
-                    </div>
+                       ))}
+                      </div>
+                      {/* Pagination Controls */}
+                      {totalSpeakerPages > 1 && (
+                         <div className="flex justify-between items-center mt-4">
+                           <button
+                             onClick={() => setSpeakerCurrentPage(prev => Math.max(prev - 1, 1))}
+                             disabled={speakerCurrentPage === 1}
+                             className={getPaginationButtonClass(speakerCurrentPage === 1)}
+                           >
+                             &larr; Previous
+                           </button>
+                           <span className="text-sm text-gray-400">
+                             Page {speakerCurrentPage} of {totalSpeakerPages}
+                           </span>
+                           <button
+                             onClick={() => setSpeakerCurrentPage(prev => Math.min(prev + 1, totalSpeakerPages))}
+                             disabled={speakerCurrentPage === totalSpeakerPages}
+                             className={getPaginationButtonClass(speakerCurrentPage === totalSpeakerPages)}
+                           >
+                             Next &rarr;
+                           </button>
+                         </div>
+                       )}
+                    </>
                  ) : (
                    <p className="text-gray-400 text-sm">No speakers match the current filters.</p>
                  )}

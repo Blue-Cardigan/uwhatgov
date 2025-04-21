@@ -710,7 +710,7 @@ export default function Home() {
           <div className="flex flex-col items-center justify-center h-full text-gray-400 relative"> {/* Added relative positioning */}
              <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
                <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
-               <p className="my-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
+               <p className="my-4 text-sm text-gray-500">View parliamentary debates<br/>formatted like your favourite chat app.</p>
                <Image
                  src="/whatguv.svg"
                  alt="UWhatGov Logo"
@@ -724,7 +724,7 @@ export default function Home() {
              {!authLoading && user && (
                 <button
                     onClick={handleLogout}
-                    className="absolute bottom-4 right-4 px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                    className="absolute top-4 right-4 px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
                     title={`Sign out ${user.email}`}
                 >
                     Sign Out
@@ -734,7 +734,7 @@ export default function Home() {
              {!authLoading && user && (
                <Link
                    href="/dashboard"
-                   className="absolute bottom-4 left-4 px-3 py-1 text-xs text-indigo-400 bg-[#202c33] rounded hover:bg-gray-700 hover:text-indigo-300 transition-colors"
+                   className="absolute top-4 left-4 px-3 py-1 text-xs text-indigo-400 bg-[#202c33] rounded hover:bg-gray-700 hover:text-indigo-300 transition-colors"
                >
                    View Dashboard
                 </Link>
