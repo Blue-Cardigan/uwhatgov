@@ -165,7 +165,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
         setIsLoading(false);
     }
     // This effect now handles both the very first load and subsequent loads triggered by filter changes (when not in search mode)
-  }, [lastSittingDate, houseFilter, fetchDebates, isSearchActive]); // Add houseFilter
+  }, [lastSittingDate, houseFilter, fetchDebates, isSearchActive, debates.length, isLoading]); // Add houseFilter, debates.length, isLoading
 
 
   // --- Search Functionality (Uses searchTerm and ALL filters) ---
@@ -267,7 +267,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
         setIsLoading(false);
     }
   // Remove fetchDebates from here, search uses its own API call logic
-  }, [searchTerm, startDateFilter, endDateFilter, houseFilter, isSearchActive]); // isSearchActive needed?
+  }, [searchTerm, startDateFilter, endDateFilter, houseFilter]);
 
 
   // --- Pagination --- Load previous day respecting current house filter

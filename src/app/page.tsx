@@ -537,6 +537,35 @@ export default function Home() {
                    {/* Right Icons */}
                    <div className="flex items-center gap-1 md:gap-2 text-gray-400 flex-shrink-0">
 
+                     {/* View Mode Toggle */}
+                     <div className="flex items-center border border-gray-600 rounded-full p-0.5 text-xs">
+                       <button
+                         onClick={() => setViewMode('rewritten')}
+                         className={`px-2 py-1 rounded-full flex items-center gap-1 transition-colors ${
+                           viewMode === 'rewritten'
+                             ? 'bg-gray-700 text-white'
+                             : 'text-gray-400 hover:text-gray-200'
+                         }`}
+                         title="Casual View"
+                       >
+                         <CasualIcon />
+                         <span className="hidden sm:inline">Casual</span>
+                       </button>
+                       <button
+                         onClick={() => setViewMode('original')}
+                         className={`px-2 py-1 rounded-full flex items-center gap-1 transition-colors ${
+                           viewMode === 'original'
+                             ? 'bg-gray-700 text-white'
+                             : 'text-gray-400 hover:text-gray-200'
+                         } disabled:opacity-50 disabled:cursor-not-allowed`}
+                         title="Original View"
+                         disabled={!originalDebate || isLoadingOriginal || !!errorOriginal} // Disable if no original data or loading/error
+                       >
+                         <OriginalIcon />
+                         <span className="hidden sm:inline">Original</span>
+                       </button>
+                     </div>
+
                      {/* Search Icon */}
                      {!searchIsOpen && selectedDebateId && (
                          <button

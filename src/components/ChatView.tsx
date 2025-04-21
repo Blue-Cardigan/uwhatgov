@@ -10,7 +10,6 @@ import { TypingIndicator } from './TypingIndicator';
 import { escapeRegExp } from '@/utils/stringUtils';
 import { getBaseSpeakerName } from '@/utils/chatUtils';
 import type { Database } from '@/lib/database.types'; // Assuming database types are generated
-import { useMemo } from 'react'; // Add useMemo if not already imported
 
 // Define types locally for the rewritten version
 export interface Speech {
@@ -349,7 +348,7 @@ const ChatView = forwardRef(({
          // Optionally: Set a timeout to clear the 'error' state after a few seconds?
          // setTimeout(() => { ... clear error logic ... }, 5000);
     }
-  }, [currentUserId, debateId, getDisplayedReactions, supabase]); // Dependencies
+  }, [currentUserId, debateId, getDisplayedReactions]); // Remove supabase from dependencies
   // ---
 
   // Effect for reactions fetching and real-time subscription - Updated dependencies
