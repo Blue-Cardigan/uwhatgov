@@ -248,10 +248,11 @@ import {
   
     // Prompt for summarization
     const prompt = `
-  You are an AI assistant tasked with summarizing a parliamentary debate transcript.
+  You are an AI assistant tasked with summarising a parliamentary debate transcript.
   
   **Task:** Generate a concise, neutral summary (around 2-3 sentences) of the key points discussed in the following debate transcript.
   Focus on the main arguments or topics raised.
+  Use British English spelling.
   
   **Debate Title:** ${debateTitle || 'Untitled Debate'}
   

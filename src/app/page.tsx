@@ -32,6 +32,10 @@ interface ChatViewHandle {
 // Icons for view toggle
 const CasualIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M 26.6875 12.6602 C 26.9687 12.6602 27.1094 12.4961 27.1797 12.2383 C 27.9062 8.3242 27.8594 8.2305 31.9375 7.4570 C 32.2187 7.4102 32.3828 7.2461 32.3828 6.9648 C 32.3828 6.6836 32.2187 6.5195 31.9375 6.4726 C 27.8828 5.6524 28.0000 5.5586 27.1797 1.6914 C 27.1094 1.4336 26.9687 1.2695 26.6875 1.2695 C 26.4062 1.2695 26.2656 1.4336 26.1953 1.6914 C 25.3750 5.5586 25.5156 5.6524 21.4375 6.4726 C 21.1797 6.5195 20.9922 6.6836 20.9922 6.9648 C 20.9922 7.2461 21.1797 7.4102 21.4375 7.4570 C 25.5156 8.2774 25.4687 8.3242 26.1953 12.2383 C 26.2656 12.4961 26.4062 12.6602 26.6875 12.6602 Z M 15.3438 28.7852 C 15.7891 28.7852 16.0938 28.5039 16.1406 28.0821 C 16.9844 21.8242 17.1953 21.8242 23.6641 20.5821 C 24.0860 20.5117 24.3906 20.2305 24.3906 19.7852 C 24.3906 19.3633 24.0860 19.0586 23.6641 18.9883 C 17.1953 18.0977 16.9609 17.8867 16.1406 11.5117 C 16.0938 11.0899 15.7891 10.7852 15.3438 10.7852 C 14.9219 10.7852 14.6172 11.0899 14.5703 11.5352 C 13.7969 17.8164 13.4687 17.7930 7.0469 18.9883 C 6.6250 19.0821 6.3203 19.3633 6.3203 19.7852 C 6.3203 20.2539 6.6250 20.5117 7.1406 20.5821 C 13.5156 21.6133 13.7969 21.7774 14.5703 28.0352 C 14.6172 28.5039 14.9219 28.7852 15.3438 28.7852 Z M 31.2344 54.7305 C 31.8438 54.7305 32.2891 54.2852 32.4062 53.6524 C 34.0703 40.8086 35.8750 38.8633 48.5781 37.4570 C 49.2344 37.3867 49.6797 36.8945 49.6797 36.2852 C 49.6797 35.6758 49.2344 35.2070 48.5781 35.1133 C 35.8750 33.7070 34.0703 31.7617 32.4062 18.9180 C 32.2891 18.2852 31.8438 17.8633 31.2344 17.8633 C 30.6250 17.8633 30.1797 18.2852 30.0860 18.9180 C 28.4219 31.7617 26.5938 33.7070 13.9140 35.1133 C 13.2344 35.2070 12.7891 35.6758 12.7891 36.2852 C 12.7891 36.8945 13.2344 37.3867 13.9140 37.4570 C 26.5703 39.1211 28.3281 40.8321 30.0860 53.6524 C 30.1797 54.2852 30.6250 54.7305 31.2344 54.7305 Z" clipRule="evenodd" /></svg>;
 const OriginalIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M4.25 5.5a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" clipRule="evenodd" /></svg>;
+// Three dots icon
+const OptionsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M10 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM10 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM11.5 15.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z" /></svg>;
+// Regenerate/Refresh icon
+const RefreshIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M20.944 12.979c-.489 4.509-4.306 8.021-8.944 8.021-2.698 0-5.112-1.194-6.763-3.075l1.245-1.633C7.787 17.969 9.695 19 11.836 19c3.837 0 7.028-2.82 7.603-6.5h-2.125l3.186-4.5 3.186 4.5h-2.742zM12 5c2.2 0 4.157.996 5.445 2.553l-1.31 1.548C14.98 7.725 13.556 7 12 7c-3.837 0-7.028 2.82-7.603 6.5h2.125l-3.186 4.5L.15 13.5h2.742C3.38 8.991 7.196 5 12 5z" clipRule="evenodd" /></svg>;
 
 // localStorage Keys
 const METADATA_CACHE_PREFIX = 'uwhatgov_metadata_';
@@ -68,13 +72,6 @@ export default function Home() {
   // Resizable Panel state
   const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null); // Moved from ChatView
   const [originalPanelHeight, setOriginalPanelHeight] = useState(192); // Moved from ChatView, default height (12rem)
-
-  // Search State - Managed by useDebateSearch hook below
-  // const [_isSearchOpen, _setIsSearchOpen] = useState(false); // State for search input visibility - REMOVED
-  // const [_searchQuery, _setSearchQuery] = useState(''); // REMOVED
-  // const [_searchResults, _setSearchResults] = useState<number[]>([]); // Stores indices (OrderInSection) of matches - REMOVED
-  // const [_currentMatchIndex, _setCurrentMatchIndex] = useState(-1); // Index within searchResults array - REMOVED
-
   // State for regeneration loading
   const [isRegenerating, setIsRegenerating] = useState(false);
 
@@ -86,6 +83,9 @@ export default function Home() {
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [errorSummary, setErrorSummary] = useState<string | null>(null);
+
+  // State for Header Options Dropdown
+  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
 
   // Use the custom hook for search state and logic
   const {
@@ -105,6 +105,43 @@ export default function Home() {
     rewrittenDebateRef, // Pass the ref
     chatViewRef,        // Pass ChatView ref for scrolling
   });
+
+  // Function to handle regeneration request
+  const handleRegenerate = useCallback(() => {
+    if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) return;
+    if (!selectedDebateId) {
+        console.warn("[handleRegenerate] No debate selected, cannot regenerate.");
+        return;
+    }
+    console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
+    setIsRegenerating(true);
+    setIsOptionsMenuOpen(false); // Close menu
+    
+    // Clear memory cache
+    originalDebateCache.current.delete(selectedDebateId);
+    console.log(`[handleRegenerate] Cleared memory cache for ${selectedDebateId}`);
+
+    // Clear localStorage
+    const localStorageKey = ORIGINAL_DEBATE_CACHE_PREFIX + selectedDebateId;
+    try {
+        localStorage.removeItem(localStorageKey);
+        console.log(`[handleRegenerate] Cleared localStorage for ${selectedDebateId}`);
+    } catch (error) {
+        console.error(`[handleRegenerate] Error removing localStorage item ${localStorageKey}:`, error);
+    }
+
+    // Clear potentially stale rewritten data ref
+    rewrittenDebateRef.current = null;
+
+    // Reset original item view in case it was open
+    setSelectedOriginalIndex(null);
+
+    // Trigger the stream in ChatView
+    chatViewRef.current?.triggerStream();
+    console.log(`[handleRegenerate] Triggered stream for ${selectedDebateId}`);
+    
+    // Note: Need ChatView callback to reset isRegenerating on completion/failure.
+  }, [selectedDebateId]);
 
   // Fetch Original Debate Data (incorporates memory & localStorage caching)
   const fetchOriginalDebate = useCallback(async (debateId: string | null) => {
@@ -271,6 +308,12 @@ export default function Home() {
       }
   }, []); 
 
+  // Handle Logout
+  const handleLogout = useCallback(() => {
+    logout();
+    setIsOptionsMenuOpen(false); // Close menu after logout
+  }, [logout]);
+
   // Handle Debate Selection (triggered by ChatList or DebateInitializer)
   const handleDebateSelect = useCallback((debateId: string | null) => {
     console.log(`[handleDebateSelect] Selecting debate: ${debateId}`);
@@ -281,6 +324,7 @@ export default function Home() {
       setSelectedDebateMetadata(null);
       setSummaryText(null);
       setIsSummaryOpen(false);
+      setIsOptionsMenuOpen(false); // Close options menu on new debate select
       setSelectedOriginalIndex(null);
       closeDebateSearch(); // Use the function from the hook
       router.push('/');
@@ -300,6 +344,7 @@ export default function Home() {
     setOriginalDebate(null);
     setSummaryText(null);
     setIsSummaryOpen(false);
+    setIsOptionsMenuOpen(false); // Close options menu on new debate select
 
     router.push(`/?debateId=${debateId}`);
     fetchSelectedDebateMetadata(debateId);
@@ -345,7 +390,11 @@ export default function Home() {
   }, [selectedDebateId, metadataCache, fetchSelectedDebateMetadata]);
 
   // Handle Stream Completion
-  // ... existing code ...
+  // TODO: Add callback from ChatView to set isRegenerating = false
+  // const handleStreamComplete = useCallback(() => {
+  //   setIsRegenerating(false);
+  //   console.log("[handleStreamComplete] Stream finished or failed, regeneration state reset.");
+  // }, []);
 
   // Calculate the selected original item based on state here
   const selectedOriginalItem = (selectedOriginalIndex !== null && originalDebate?.Items)
@@ -388,29 +437,23 @@ export default function Home() {
           w-full md:w-2/5 border-r border-gray-700 flex-col bg-[#111b21]
         `}
       >
-        {/* Updated Sidebar Header */}
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#202c33] min-h-[64px]"> {/* Added min-height */} 
-          {authLoading ? (
-            <span className="text-sm text-gray-400 italic">Loading...</span>
-          ) : user ? (
-            <>
-              <span className="text-sm text-gray-300 truncate" title={user.email}>{user.email}</span>
+        {/* Sidebar Header - Render conditionally */}
+        {(authLoading || !user) && (
+          <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-[#202c33] min-h-[64px]">
+            {authLoading ? (
+              <span className="text-sm text-gray-400 italic">Loading...</span>
+            ) : (
+              // We know !user is true here because of the outer condition
               <button
-                onClick={logout}
-                className="text-sm text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded hover:bg-gray-600 transition-colors"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="w-full text-center text-sm bg-indigo-600 text-white py-1.5 px-3 rounded-md hover:bg-indigo-700 transition-colors"
               >
-                Logout
+                Sign In / Sign Up
               </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setIsAuthModalOpen(true)}
-              className="w-full text-center text-sm bg-indigo-600 text-white py-1.5 px-3 rounded-md hover:bg-indigo-700 transition-colors"
-            >
-              Sign In / Sign Up
-            </button>
-          )}
-        </div>
+            )}
+            {/* Right side content could go here if needed when loading/logged out */}
+          </div>
+        )}
         <div className="flex-grow overflow-y-auto">
           {/* Wrap DebateInitializer in Suspense */}
           <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading debate list...</div>}>
@@ -440,8 +483,8 @@ export default function Home() {
       >
         {selectedDebateId ? (
           <>
-            {/* Header */}
-            <header className="p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10 h-16">
+            {/* Header - Added relative positioning for dropdown */}
+            <header className="relative p-3 flex items-center justify-between border-b border-gray-700 bg-[#202c33] flex-shrink-0 z-10 h-16">
                {/* Render Search Header only if a debate is selected */}
                {selectedDebateId && searchIsOpen && (
                  <SearchHeader
@@ -506,56 +549,6 @@ export default function Home() {
                          </button>
                      )}
 
-                     {/* Regenerate Button (Only in rewritten view) */} 
-                     {viewMode === 'rewritten' && (
-                         <button
-                             onClick={() => {
-                                 if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) return;
-                                 if (!selectedDebateId) {
-                                     console.warn("[handleRegenerate] No debate selected, cannot regenerate.");
-                                     return;
-                                 }
-                                 console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
-                                 setIsRegenerating(true);
-                                 
-                                 // Clear memory cache
-                                 originalDebateCache.current.delete(selectedDebateId);
-                                 console.log(`[handleRegenerate] Cleared memory cache for ${selectedDebateId}`);
-
-                                 // Clear localStorage
-                                 const localStorageKey = ORIGINAL_DEBATE_CACHE_PREFIX + selectedDebateId;
-                                 try {
-                                     localStorage.removeItem(localStorageKey);
-                                     console.log(`[handleRegenerate] Cleared localStorage for ${selectedDebateId}`);
-                                 } catch (error) {
-                                     console.error(`[handleRegenerate] Error removing localStorage item ${localStorageKey}:`, error);
-                                 }
-
-                                 // Clear potentially stale rewritten data ref
-                                 rewrittenDebateRef.current = null;
-
-                                 // Reset original item view in case it was open
-                                 setSelectedOriginalIndex(null);
-
-                                 // Trigger the stream in ChatView
-                                 chatViewRef.current?.triggerStream();
-                                 console.log(`[handleRegenerate] Triggered stream for ${selectedDebateId}`);
-                                 
-                                 // Note: We need a mechanism (e.g., a callback prop from ChatView)
-                                 // to set isRegenerating back to false when the stream completes or fails.
-                                 // For now, it remains true until navigation/reload.
-                             }}
-                             className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isRegenerating ? 'animate-spin' : ''}`}
-                             title="Regenerate Casual Version"
-                             disabled={!selectedDebateId || isRegenerating}
-                         >
-                             {/* Simple Refresh Icon */} 
-                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                                 <path fillRule="evenodd" d="M20.944 12.979c-.489 4.509-4.306 8.021-8.944 8.021-2.698 0-5.112-1.194-6.763-3.075l1.245-1.633C7.787 17.969 9.695 19 11.836 19c3.837 0 7.028-2.82 7.603-6.5h-2.125l3.186-4.5 3.186 4.5h-2.742zM12 5c2.2 0 4.157.996 5.445 2.553l-1.31 1.548C14.98 7.725 13.556 7 12 7c-3.837 0-7.028 2.82-7.603 6.5h2.125l-3.186 4.5L.15 13.5h2.742C3.38 8.991 7.196 5 12 5z" clipRule="evenodd" />
-                             </svg>
-                          </button>
-                     )}
-
                      {/* Summary Toggle Button */} 
                      <button
                          onClick={() => setIsSummaryOpen(prev => !prev)} // Toggle dropdown
@@ -568,28 +561,52 @@ export default function Home() {
                          </svg>
                      </button>
 
-                    {/* View Mode Toggle Button */}
-                    <button
-                       onClick={() => {
-                           const nextMode = viewMode === 'rewritten' ? 'original' : 'rewritten';
-                           if (nextMode === 'original' && selectedDebateId && !originalDebate && !isLoadingOriginal) {
-                               fetchOriginalDebate(selectedDebateId);
-                           }
-                           setViewMode(nextMode);
-                       }}
-                       className={`p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                         viewMode === 'rewritten'
-                           ? 'bg-teal-600 text-white hover:bg-teal-700'
-                           : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
-                       }`}
+                     {/* Options Dropdown Button ('Three Dots') */}
+                     <button
+                       onClick={() => setIsOptionsMenuOpen(prev => !prev)}
+                       className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isOptionsMenuOpen ? 'bg-gray-700 text-white' : ''}`}
+                       title="Options"
                        disabled={!selectedDebateId}
-                       title={`Switch to ${viewMode === 'rewritten' ? 'Original' : 'Casual'} view`}
                      >
-                       {viewMode === 'rewritten' ? <CasualIcon /> : <OriginalIcon />}
-                       {/* Text removed for icon-only button */}
+                       <OptionsIcon />
                      </button>
 
                    </div>
+
+                   {/* Options Dropdown Menu */}
+                   {isOptionsMenuOpen && (
+                     <div className="absolute top-14 right-3 mt-1 w-48 bg-[#2a3942] rounded-md shadow-lg py-1 z-20">
+                       {/* Regenerate Option (Conditional) */}
+                       {viewMode === 'rewritten' && (
+                           <button
+                               onClick={handleRegenerate}
+                               className={`w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${isRegenerating ? 'cursor-wait' : ''}`}
+                               disabled={!selectedDebateId || isRegenerating}
+                           >
+                               <RefreshIcon />
+                               {isRegenerating ? 'Regenerating...' : 'Regenerate'}
+                           </button>
+                       )}
+
+                       {/* User Info & Logout (Conditional) */}
+                       {user && (
+                         <>
+                           <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-600 mt-1 pt-2">
+                             Signed in as:
+                           </div>
+                           <div className="px-4 py-1 text-sm text-gray-300 truncate" title={user.email}>
+                             {user.email}
+                           </div>
+                           <button
+                             onClick={handleLogout}
+                             className="w-full text-left px-4 py-2 text-sm text-indigo-400 hover:bg-gray-700 hover:text-indigo-300"
+                           >
+                             Logout
+                           </button>
+                         </>
+                       )}
+                     </div>
+                   )}
                  </>
                )}
             </header>
@@ -622,6 +639,8 @@ export default function Home() {
                 searchQuery={currentSearchQuery} // Pass search query
                 highlightedIndex={highlightedIndex} // Pass highlighted item's index
                 onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback
+                // Pass stream completion handler (if implemented in ChatView)
+                // onStreamComplete={handleStreamComplete}
               />
             </div>
 
@@ -667,5 +686,3 @@ export default function Home() {
     </main>
   );
 }
-
-// Removed old JSX structure
