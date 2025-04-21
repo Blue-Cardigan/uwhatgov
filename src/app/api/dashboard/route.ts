@@ -1,4 +1,3 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import type { Database } from '@/lib/database.types'; // Adjust path as needed
 import { createClient } from '@/lib/supabase/server'; // Import the server client utility
@@ -69,7 +68,7 @@ type ReactionRow = Database['public']['Tables']['reactions_uwhatgov']['Row'];
 // Define the base Row type for members
 type MemberRow = Database['public']['Tables']['members']['Row'];
 
-export async function GET(request: Request) {
+export async function GET() {
   const supabase = createClient();
 
   try {
@@ -106,7 +105,7 @@ export async function GET(request: Request) {
     const userTotalReactionsCount = userBaseReactions.length;
 
     // 2. Fetch Debate Content for ALL relevant debates
-    let debateContentMap = new Map<string, DebateContent>();
+    const debateContentMap = new Map<string, DebateContent>();
     const allDebateIds = [...new Set(allReactions.map(r => r.debate_id))];
 
     if (allDebateIds.length > 0) {
@@ -130,7 +129,7 @@ export async function GET(request: Request) {
                         } else {
                             // console.warn(`Parsed content for debate ${d.id} has unexpected structure.`);
                         }
-                    } catch (parseError) {
+                    } catch (_parseError) {
                         // console.error(`Error parsing content JSON for debate ${d.id}:`, parseError);
                         debateContentMap.set(d.id, { title: 'Content Error', speeches: [] });
                     }

@@ -59,7 +59,7 @@ interface DashboardData {
 type TrendViewMode = 'user' | 'global';
 
 export default function DashboardPage() {
-  const { user, loading: authLoading, supabase } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
