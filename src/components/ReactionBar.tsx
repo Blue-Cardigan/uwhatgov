@@ -17,7 +17,6 @@ const DEFAULT_EMOJIS = ['👍', '❤️', '😂', '🤔', '👎'];
 const MAX_REACTIONS_PER_USER = 2;
 
 export const ReactionBar = ({
-    speechOriginalIndex,
     reactions,
     userId,
     onReactionClick,
