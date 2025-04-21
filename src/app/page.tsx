@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image'; // Import Next Image
+import Link from 'next/link'; // Import Link
 
 // Import components
 import ChatList from '@/components/ChatList';
@@ -13,6 +14,7 @@ import DebateInitializer from '@/components/DebateInitializer'; // Import the ne
 import SummaryViewer from '@/components/SummaryViewer'; // Import new component
 import OriginalDebateViewer from '@/components/OriginalDebateViewer'; // Import new component
 import SearchHeader from '@/components/SearchHeader'; // Import new component
+import CookieConsentBanner from '@/components/CookieConsentBanner'; // Import cookie banner
 
 // Import types
 import { InternalDebateSummary, DebateMetadata } from '@/types';
@@ -620,6 +622,15 @@ export default function Home() {
                        {/* User Info & Logout (Conditional) */}
                        {user && (
                          <>
+                           <Link
+                             href="/dashboard"
+                             className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                             onClick={() => setIsOptionsMenuOpen(false)} // Close menu on click
+                           >
+                             {/* Optional: Add an icon */}
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M11.49 3.17a.75.75 0 0 1 1.02.07l3 3a.75.75 0 0 1 .07 1.02l-7 7a.75.75 0 0 1-1.09.02l-4-4a.75.75 0 0 1 1.06-1.06l3.47 3.47L11.49 3.17Z" clipRule="evenodd" /></svg>
+                             Dashboard
+                           </Link>
                            <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-600 mt-1 pt-2">
                              Signed in as:
                            </div>
@@ -696,22 +707,43 @@ export default function Home() {
           </>
         ) : (
           // Placeholder when no debate is selected
-          <div className="flex flex-col items-center justify-center h-full text-gray-400">
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 relative"> {/* Added relative positioning */}
              <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
                <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
                <p className="my-4 text-sm text-gray-500">View UK parliamentary debates<br/>formatted like your favourite chat app.</p>
-               <Image 
-                 src="/whatguv.svg" 
-                 alt="UWhatGov Logo" 
+               <Image
+                 src="/whatguv.svg"
+                 alt="UWhatGov Logo"
                  width={200}
                  height={200}
                  className="text-gray-500 opacity-50 border-b border-gray-600 mx-auto"
                />
                <div className="pt-4 text-xs text-gray-600">Select a debate from the list to start viewing.</div>
              </div>
+             {/* Subtle Logout Button in Corner (only if user logged in) */}
+             {!authLoading && user && (
+                <button
+                    onClick={handleLogout}
+                    className="absolute bottom-4 right-4 px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                    title={`Sign out ${user.email}`}
+                >
+                    Sign Out
+                </button>
+             )}
+             {/* Dashboard Link on Placeholder */} 
+             {!authLoading && user && (
+               <Link
+                   href="/dashboard"
+                   className="absolute bottom-4 left-4 px-3 py-1 text-xs text-indigo-400 bg-[#202c33] rounded hover:bg-gray-700 hover:text-indigo-300 transition-colors"
+               >
+                   View Dashboard
+                </Link>
+             )}
           </div>
         )}
       </div>
+      {/* Cookie Consent Banner - Renders outside the main content flow */}
+      <CookieConsentBanner />
     </main>
   );
 }

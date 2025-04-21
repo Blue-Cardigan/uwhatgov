@@ -172,15 +172,15 @@ export async function GET(
         async transform(speech: Speech, controller) {
             // Logic is now much simpler: Handle narrative buffering or send regular speech
             try {
-                 if (speech.speaker === 'System/Narrative') {
+                 if (speech.speaker === 'Speaker') {
                     console.log(`[API Route /stream/${debateId} Transform] Buffering narrative message (Index: ${speech.originalIndex}).`);
-                     if (lastSpeaker === 'System/Narrative' && bufferedNarrativePayload) {
+                     if (lastSpeaker === 'Speaker' && bufferedNarrativePayload) {
                          bufferedNarrativePayload.text += ` ${speech.text.trim()}`; // Combine text
                      } else {
                          sendBufferedNarrative(controller); // Send previous narrative if any
                          bufferedNarrativePayload = { ...speech }; // Buffer the new one (text is already trimmed in pipeGeneratorToStream)
                      }
-                     lastSpeaker = 'System/Narrative';
+                     lastSpeaker = 'Speaker';
                  } else {
                      // Regular speaker
                      sendBufferedNarrative(controller); // Send any pending narrative first
@@ -290,9 +290,9 @@ export async function GET(
                                  parsedSpeech.text = parsedSpeech.text.trim();
 
                                  // Handle narrative combining for accumulation
-                                 if (parsedSpeech.speaker === 'System/Narrative') {
+                                 if (parsedSpeech.speaker === 'Speaker') {
                                      const lastAccumulated = accumulatedSpeeches[accumulatedSpeeches.length - 1];
-                                     if (lastAccumulated && lastAccumulated.speaker === 'System/Narrative') {
+                                     if (lastAccumulated && lastAccumulated.speaker === 'Speaker') {
                                          lastAccumulated.text += ` ${parsedSpeech.text.trim()}`; // Combine text
                                      } else {
                                          accumulatedSpeeches.push({ ...parsedSpeech }); // Add new narrative (already trimmed)
