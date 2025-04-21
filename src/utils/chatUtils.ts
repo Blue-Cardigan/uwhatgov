@@ -5,7 +5,7 @@
  * @returns The extracted base name or 'Unknown Speaker'.
  */
 export function getBaseSpeakerName(speakerString: string): string {
-    if (!speakerString) return 'Unknown Speaker';
+    if (!speakerString) return 'Speaker';
 
     let name = speakerString.trim();
     // TODO: Consider making this list dynamic or loading from a config
@@ -44,5 +44,5 @@ export function getBaseSpeakerName(speakerString: string): string {
     } 
     // Case 4: No parentheses at all - name remains the original trimmed string
 
-    return name || 'Unknown Speaker'; // Return the processed name or fallback
+    return name || 'Speaker'; // Return the processed name or fallback
 } 

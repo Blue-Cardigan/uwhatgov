@@ -262,7 +262,7 @@ export const MessageBubble = ({
                         onClick={handleInfoboxToggle} // Still allow infobox toggle here
                     >
                         <p className={`font-semibold text-sm mb-1 ${getPartyColorClass(partyAbbreviation ?? null)} pointer-events-none`}>
-                            <HighlightedText text={speech.speaker || 'Unknown Speaker'} query={searchQuery} />
+                            <HighlightedText text={speech.speaker || 'Speaker'} query={searchQuery} />
                         </p>
                     </div>
                     {/* Speech Text */}

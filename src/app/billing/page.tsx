@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { loadStripe, Stripe } from '@stripe/stripe-js';
 import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Icon Component (Checkmark)
 const CheckIcon = () => (
@@ -26,7 +27,9 @@ const getStripe = () => {
 };
 
 const BillingPage = () => {
+  const { isProUser, loadingSubscription, user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubscribe = async () => {
@@ -78,69 +81,120 @@ const BillingPage = () => {
     }
   };
 
+  const handleManageSubscription = async () => {
+    setIsPortalLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/stripe/create-portal-session', {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const { error: apiError } = await response.json();
+        throw new Error(apiError || 'Failed to create portal session');
+      }
+
+      const { url } = await response.json();
+      if (!url) {
+        throw new Error('No portal session URL returned from backend');
+      }
+
+      // Redirect user to the Stripe Customer Portal
+      window.location.assign(url);
+
+    } catch (err) {
+      console.error('Portal session error:', err);
+      const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      setError(message);
+      setIsPortalLoading(false); // Only set loading false on error, otherwise redirect happens
+    }
+    // No need to set isLoading to false here, as the page will redirect
+  };
+
+  if (loadingSubscription) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#0b141a] text-gray-200">
+        <p>Loading subscription status...</p>
+      </div>
+    );
+  }
+
   return (
-    // Use the darker chat background
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#0b141a] text-gray-200">
       <div className="w-full max-w-md">
-        {/* Consistent back link style */}
         <div className="mb-6 text-left">
           <Link href="/dashboard" className="text-indigo-400 hover:text-indigo-300 hover:underline text-sm">
             &larr; Back to Dashboard
           </Link>
         </div>
 
-        {/* Centered content card */}
         <div className="bg-[#202c33] rounded-lg shadow-lg p-6 md:p-8 w-full">
-          <h1 className="text-3xl font-bold mb-6 text-center text-gray-100">Upgrade to Pro</h1>
+          {isProUser ? (
+            <>
+              <h1 className="text-3xl font-bold mb-6 text-center text-gray-100">Subscription Active</h1>
+              <p className="text-center text-gray-300 mb-6">You are currently on the Pro plan. Thank you for your support!</p>
+              <button
+                onClick={handleManageSubscription}
+                disabled={isPortalLoading}
+                className={`w-full px-4 py-2.5 text-white font-semibold rounded-md transition-colors duration-200 ${
+                  isPortalLoading
+                    ? 'bg-gray-600 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {isPortalLoading ? 'Processing...' : 'Manage Subscription'}
+              </button>
+              {error && (
+                <p className="text-red-400 text-center mt-4 text-sm">Error: {error}</p>
+              )}
+            </>
+          ) : (
+            <>
+              <h1 className="text-3xl font-bold mb-6 text-center text-gray-100">Upgrade to Pro</h1>
 
-          <div className="text-center mb-6">
-            <p className="text-2xl font-semibold text-gray-100">£7.50 <span className="text-base font-normal text-gray-400">/ month</span></p>
-            <p className="text-xs text-gray-500 mt-1">Unlock premium features</p>
-          </div>
+              <div className="text-center mb-6">
+                <p className="text-2xl font-semibold text-gray-100">£7.50 <span className="text-base font-normal text-gray-400">/ month</span></p>
+                <p className="text-xs text-gray-500 mt-1">Unlock premium features</p>
+              </div>
 
-          {/* Feature list with icons */}
-          <ul className="space-y-3 mb-8">
-            <li className="flex items-start">
-              <CheckIcon />
-              <span className="ml-2 text-gray-300">More detailed insights & analysis</span>
-            </li>
-            <li className="flex items-start">
-              <CheckIcon />
-              <span className="ml-2 text-gray-300">Faster processing times</span>
-            </li>
-            <li className="flex items-start">
-              <CheckIcon />
-              <span className="ml-2 text-gray-300">Priority support queue</span>
-            </li>
-             <li className="flex items-start">
-              <CheckIcon />
-              <span className="ml-2 text-gray-300">Access to future Pro features</span>
-            </li>
-            {/* Add other features similarly */}
-          </ul>
+              <ul className="space-y-3 mb-8">
+                <li className="flex items-start">
+                  <CheckIcon />
+                  <span className="ml-2 text-gray-300">Access to all debate summaries</span>
+                </li>
+                <li className="flex items-start">
+                  <CheckIcon />
+                  <span className="ml-2 text-gray-300">Full debate engagement data</span>
+                </li>
+                <li className="flex items-start">
+                  <CheckIcon />
+                  <span className="ml-2 text-gray-300">CSV export of all data</span>
+                </li>
+                 <li className="flex items-start">
+                  <CheckIcon />
+                  <span className="ml-2 text-gray-300">Access to future Pro features</span>
+                </li>
+              </ul>
 
-          <button
-            onClick={handleSubscribe}
-            disabled={isLoading}
-            className={`w-full px-4 py-2.5 text-white font-semibold rounded-md transition-colors duration-200 ${
-              isLoading
-                ? 'bg-gray-600 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-700'
-            }`}
-          >
-            {isLoading ? 'Processing...' : 'Subscribe Now'}
-          </button>
+              <button
+                onClick={handleSubscribe}
+                disabled={isLoading}
+                className={`w-full px-4 py-2.5 text-white font-semibold rounded-md transition-colors duration-200 ${
+                  isLoading
+                    ? 'bg-gray-600 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {isLoading ? 'Processing...' : 'Subscribe Now'}
+              </button>
 
-          {error && (
-            <p className="text-red-400 text-center mt-4 text-sm">Error: {error}</p>
+              {error && (
+                <p className="text-red-400 text-center mt-4 text-sm">Error: {error}</p>
+              )}
+            </>
           )}
         </div>
-
-         {/* Optional: Add manage subscription link later */}
-         {/* <div className="mt-6 text-center text-gray-500 text-sm">
-             <p>Already subscribed?</p>
-             <button className="text-indigo-400 hover:underline">Manage your subscription</button>
-         </div> */}
       </div>
     </div>
   );

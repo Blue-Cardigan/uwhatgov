@@ -59,9 +59,17 @@ interface RankedDebate {
     debateId: string;
     title: string;       // Debate title
     summary?: string;    // Add optional summary field
-    reactionCount: number;
-    reactionsByEmoji: { [emoji: string]: number };
+    reactionCount: number; // Total reactions within the period
+    reactionsByEmoji: { [emoji: string]: number }; // Aggregate emoji counts for the period
     link: string;        // Link to the debate page
+    // --- New field for detailed speech reactions ---
+    reactionsBySpeech?: {
+        [speechIndex: number]: {
+            text: string;
+            totalReactions: number;
+            emojis: { [emoji: string]: number };
+        }
+    };
 }
 
 // Updated DashboardData type for API response
@@ -317,9 +325,24 @@ export async function GET() {
     const monthlySpeakerCounts: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
 
     // Aggregate reactions per debate ID for different timeframes
-    const dailyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
-    const weeklyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
-    const monthlyDebateCounts: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } } = {};
+    // Updated structure to include reactions by speech
+    type DebateCountsForPeriod = {
+        [debateId: string]: {
+            total: number;
+            emojis: { [emoji: string]: number };
+            speeches: {
+                [index: number]: {
+                    text: string;
+                    totalReactions: number;
+                    emojis: { [emoji: string]: number };
+                }
+            }
+        }
+    };
+
+    const dailyDebateCounts: DebateCountsForPeriod = {};
+    const weeklyDebateCounts: DebateCountsForPeriod = {};
+    const monthlyDebateCounts: DebateCountsForPeriod = {};
 
     // --- Process ALL Reactions ---
     // Populate speaker counts, global trends, and timed debate/speaker counts
@@ -327,11 +350,13 @@ export async function GET() {
         const debateMeta = debateMetadataMap.get(reaction.debate_id);
         // Parse content *only if needed* to find the speaker
         let speakerName: string | undefined = undefined;
+        let speech: SpeechContent | undefined = undefined;
+
         if (debateMeta?.content) {
             // Minimal parsing just to find the relevant speech/speaker?
             // For now, full parse via helper is simpler, accept performance hit.
-            const { speeches } = parseDebateContent(debateMeta.content, reaction.debate_id);
-            const speech = speeches.find(s => s.originalIndex === reaction.speech_original_index);
+            const { speeches: allSpeechesInDebate } = parseDebateContent(debateMeta.content, reaction.debate_id);
+            speech = allSpeechesInDebate.find(s => s.originalIndex === reaction.speech_original_index);
             speakerName = speech?.speaker;
         } else {
             // console.warn(`No debate content found for reaction on debate ${reaction.debate_id}`);
@@ -366,9 +391,19 @@ export async function GET() {
                 dailySpeakerCounts[speakerName].emojis[emoji] = (dailySpeakerCounts[speakerName].emojis[emoji] || 0) + 1;
             }
             // Aggregate Debate Counts
-            if (!dailyDebateCounts[debateId]) dailyDebateCounts[debateId] = { total: 0, emojis: {} };
+            if (!dailyDebateCounts[debateId]) dailyDebateCounts[debateId] = { total: 0, emojis: {}, speeches: {} };
             dailyDebateCounts[debateId].total += 1;
             dailyDebateCounts[debateId].emojis[emoji] = (dailyDebateCounts[debateId].emojis[emoji] || 0) + 1;
+
+            // Aggregate Speech Reactions - Moved INSIDE the if block
+            if (speech) {
+                const speechIndex = speech.originalIndex;
+                if (!dailyDebateCounts[debateId].speeches[speechIndex]) {
+                    dailyDebateCounts[debateId].speeches[speechIndex] = { text: speech.text, totalReactions: 0, emojis: {} };
+                }
+                dailyDebateCounts[debateId].speeches[speechIndex].totalReactions += 1;
+                dailyDebateCounts[debateId].speeches[speechIndex].emojis[emoji] = (dailyDebateCounts[debateId].speeches[speechIndex].emojis[emoji] || 0) + 1;
+            }
         }
         // Weekly Counts
         if (reactionDate >= weeklyStartDate) {
@@ -378,9 +413,19 @@ export async function GET() {
                 weeklySpeakerCounts[speakerName].emojis[emoji] = (weeklySpeakerCounts[speakerName].emojis[emoji] || 0) + 1;
             }
              // Aggregate Debate Counts
-             if (!weeklyDebateCounts[debateId]) weeklyDebateCounts[debateId] = { total: 0, emojis: {} };
+             if (!weeklyDebateCounts[debateId]) weeklyDebateCounts[debateId] = { total: 0, emojis: {}, speeches: {} };
              weeklyDebateCounts[debateId].total += 1;
              weeklyDebateCounts[debateId].emojis[emoji] = (weeklyDebateCounts[debateId].emojis[emoji] || 0) + 1;
+
+             // Aggregate Speech Reactions - Moved INSIDE the if block
+            if (speech) {
+                const speechIndex = speech.originalIndex;
+                if (!weeklyDebateCounts[debateId].speeches[speechIndex]) {
+                    weeklyDebateCounts[debateId].speeches[speechIndex] = { text: speech.text, totalReactions: 0, emojis: {} };
+                }
+                weeklyDebateCounts[debateId].speeches[speechIndex].totalReactions += 1;
+                weeklyDebateCounts[debateId].speeches[speechIndex].emojis[emoji] = (weeklyDebateCounts[debateId].speeches[speechIndex].emojis[emoji] || 0) + 1;
+            }
         }
         // Monthly Counts
          if (reactionDate >= monthlyStartDate) {
@@ -390,9 +435,19 @@ export async function GET() {
                 monthlySpeakerCounts[speakerName].emojis[emoji] = (monthlySpeakerCounts[speakerName].emojis[emoji] || 0) + 1;
             }
             // Aggregate Debate Counts
-            if (!monthlyDebateCounts[debateId]) monthlyDebateCounts[debateId] = { total: 0, emojis: {} };
+            if (!monthlyDebateCounts[debateId]) monthlyDebateCounts[debateId] = { total: 0, emojis: {}, speeches: {} };
             monthlyDebateCounts[debateId].total += 1;
             monthlyDebateCounts[debateId].emojis[emoji] = (monthlyDebateCounts[debateId].emojis[emoji] || 0) + 1;
+
+             // Aggregate Speech Reactions - Moved INSIDE the if block
+            if (speech) {
+                const speechIndex = speech.originalIndex;
+                if (!monthlyDebateCounts[debateId].speeches[speechIndex]) {
+                    monthlyDebateCounts[debateId].speeches[speechIndex] = { text: speech.text, totalReactions: 0, emojis: {} };
+                }
+                monthlyDebateCounts[debateId].speeches[speechIndex].totalReactions += 1;
+                monthlyDebateCounts[debateId].speeches[speechIndex].emojis[emoji] = (monthlyDebateCounts[debateId].speeches[speechIndex].emojis[emoji] || 0) + 1;
+            }
         }
     });
 
@@ -416,7 +471,7 @@ export async function GET() {
     // --- Prepare Pro Features Data ---
     // This function now needs the full list of debates and the parsed title/summary map
     const processProData = (
-        debateCountsForPeriod: { [debateId: string]: { total: number, emojis: { [emoji: string]: number } } },
+        debateCountsForPeriod: DebateCountsForPeriod,
         speakerCountsForPeriod: { [speakerName: string]: { total: number, emojis: { [emoji: string]: number } } },
         allDebatesList: FetchedDebateData[], // Pass the full list fetched earlier
         membersInfoMap: Map<string, Pick<MemberRow, 'member_id' | 'party'>>,
@@ -435,6 +490,7 @@ export async function GET() {
                 summary: debate.summary || undefined,
                 reactionCount: counts?.total || 0, // Default to 0 if no reactions in period
                 reactionsByEmoji: counts?.emojis || {}, // Default to empty object
+                reactionsBySpeech: counts?.speeches, // Include the detailed speech reactions (or undefined if no counts)
                 link: `/?debateId=${debate.id}`,
             };
         });

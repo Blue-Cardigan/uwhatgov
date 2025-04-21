@@ -532,7 +532,7 @@ const ChatView = forwardRef(({
                       // *** Handle Case: Missing speaker but valid text ***
                       console.warn(`[Buffer ${debateIdRef.current}] Received object missing speaker, using default. Object:`, parsedObject);
                       const newSpeech: Speech = {
-                          speaker: 'Unknown Speaker', // Use default speaker
+                          speaker: 'Speaker', // Use default speaker
                           text: parsedObject.text,
                           originalIndex: typeof parsedObject.originalIndex === 'number' ? parsedObject.originalIndex : undefined,
                           originalSnippet: typeof parsedObject.originalSnippet === 'string' ? parsedObject.originalSnippet : undefined,
@@ -899,7 +899,7 @@ const ChatView = forwardRef(({
 
         for (const speech of rewrittenDebate.speeches) {
             const baseName = getBaseSpeakerName(speech.speaker);
-            if (baseName === 'Unknown Speaker') continue;
+            if (baseName === 'Speaker') continue;
 
             // Skip if we already have a definitive party (non-null) for this speaker in the temp map
             if (tempMap.has(baseName) && tempMap.get(baseName) !== null) {

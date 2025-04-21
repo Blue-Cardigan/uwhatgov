@@ -46,7 +46,7 @@ const ORIGINAL_DEBATE_CACHE_PREFIX = 'uwhatgov_original_';
 export default function Home() {
   const router = useRouter();
   const chatViewRef = useRef<ChatViewHandle>(null); // Ref for ChatView scrolling and triggering
-  const { user, loading: authLoading, logout } = useAuth(); // Get auth state
+  const { user, loading: authLoading, logout, isProUser } = useAuth(); // Get auth state
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false); // State for Auth Modal
 
   // Caches stored in refs/state
@@ -88,7 +88,6 @@ export default function Home() {
 
   // State for Header Options Dropdown
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
-
   // Use the custom hook for search state and logic
   const {
     isSearchOpen: searchIsOpen,
@@ -643,6 +642,14 @@ export default function Home() {
                            >
                              Logout
                            </button>
+                           {/* Billing Link */}
+                           <Link
+                             href="/billing"
+                             onClick={() => setIsOptionsMenuOpen(false)}
+                             className="w-full text-left px-4 py-2 text-sm text-indigo-400 hover:bg-gray-700 hover:text-indigo-300"
+                           >
+                             {isProUser ? 'Manage Subscription' : 'Upgrade to Pro'}
+                           </Link>
                          </>
                        )}
                      </div>
@@ -724,7 +731,7 @@ export default function Home() {
              {!authLoading && user && (
                 <button
                     onClick={handleLogout}
-                    className="absolute top-4 right-4 px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                    className="absolute bottom-4 right-4 px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
                     title={`Sign out ${user.email}`}
                 >
                     Sign Out

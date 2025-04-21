@@ -53,7 +53,7 @@ export async function GET(
         const relevantContributionsText = originalDebateResponse.Items
             .filter((item: DebateContentItem) => item.ItemType === 'Contribution' && item.Value)
             .map((item: DebateContentItem) => {
-                const speaker = item.AttributedTo || 'Unknown Speaker';
+                const speaker = item.AttributedTo || 'Speaker';
                 // Strip HTML for the prompt
                 const text = (item.Value || '').replace(/<[^>]*>/g, '').trim();
                 return `Speaker: ${speaker}\nText: ${text}\n---`; // Simple format for context

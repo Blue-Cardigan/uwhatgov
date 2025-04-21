@@ -67,22 +67,74 @@ export async function GET(
 
     // --- Prepare data for Gemini ---
     const debateTitle = originalDebateResponse.Overview.Title || 'Untitled Debate';
-    // Filter and format only relevant contributions
-    const relevantContributions = originalDebateResponse.Items
+
+    // --- Combine Consecutive Contributions by the Same Speaker ---
+    interface CombinedInputItem {
+        speaker: string;
+        text: string;
+        originalIndex: number;
+        originalSnippet: string; // Snippet from the first item in the sequence
+    }
+
+    const filteredItems = originalDebateResponse.Items
         .filter((item: DebateContentItem) => item.ItemType === 'Contribution' && item.Value)
-        .map((item: DebateContentItem, index: number) => {
-             // Use OrderInSection if available and unique, otherwise use array index as fallback
-            const originalIndex = typeof item.OrderInSection === 'number' ? item.OrderInSection : index;
-            const speaker = item.AttributedTo || 'Unknown Speaker';
-            // Ensure text exists, strip HTML simply for prompt (Gemini needs clean text)
-            const text = (item.Value || '').replace(/<[^>]*>/g, '').trim();
+        // Add sorting by OrderInSection to ensure correct sequence for combining
+        .sort((a, b) => (a.OrderInSection ?? Infinity) - (b.OrderInSection ?? Infinity));
+
+    const combinedInputItems: CombinedInputItem[] = [];
+    let currentCombinedItem: CombinedInputItem | null = null;
+
+    for (const item of filteredItems) {
+        const speaker = item.AttributedTo || 'Speaker'; // Default to 'Speaker'
+        const text = (item.Value || '').replace(/<[^>]*>/g, '').trim(); // Strip HTML and trim
+        // Use OrderInSection primarily, but need a fallback if missing/null - however, filteredItems are sorted by it
+        const originalIndex = item.OrderInSection ?? -1; // Use -1 or similar to indicate issue if null, though sort helps
+
+        if (!text || originalIndex === -1) {
+             console.warn(`[API Route /stream/${debateId}] Skipping item due to missing text or OrderInSection:`, { itemId: item.ItemId, speaker: speaker });
+             continue; // Skip items without text or a valid index after processing
+        }
+
+        if (currentCombinedItem && currentCombinedItem.speaker === speaker) {
+            // Same speaker, append text
+            currentCombinedItem.text += " " + text; // Add separator
+            // Keep originalIndex and originalSnippet from the *first* item of the sequence
+        } else {
+            // Different speaker or first item
+            if (currentCombinedItem) {
+                combinedInputItems.push(currentCombinedItem); // Push the completed previous item
+            }
+            // Start a new combined item
             const snippet = text.split(' ').slice(0, 15).join(' ') + (text.split(' ').length > 15 ? '...' : '');
+            currentCombinedItem = {
+                speaker: speaker,
+                text: text,
+                originalIndex: originalIndex,
+                originalSnippet: snippet
+            };
+        }
+    }
+    // Push the last accumulated item
+    if (currentCombinedItem) {
+        combinedInputItems.push(currentCombinedItem);
+    }
 
-            // Format for the prompt, clearly indicating speaker and index
-             return `Original Index: ${originalIndex}\nSpeaker: ${speaker}\nSnippet: ${snippet}\nText: ${text}\n---\n`;
-        });
+    // --- Format Combined Data for Prompt ---
+    const combinedText = combinedInputItems.map(item =>
+        `Original Index: ${item.originalIndex}
+Speaker: ${item.speaker}
+Snippet: ${item.originalSnippet}
+Text: ${item.text}
+---
+`
+    ).join('\n');
 
-    if (relevantContributions.length === 0) {
+    // Calculate start index based on the *first* item in the *original filtered* list
+    // This ensures the prompt accurately reflects the starting point before combining
+    const startIndex = filteredItems.length > 0 ? (filteredItems[0].OrderInSection ?? 0) : 0;
+
+    // Check if any processable content remains after combining
+    if (combinedInputItems.length === 0) {
         console.warn(`[API Route /stream/${debateId}] No relevant contributions found to send to Gemini.`);
         // Return an empty stream or a specific message? Let's send a complete message.
         const readable = new ReadableStream({
@@ -100,10 +152,6 @@ export async function GET(
             },
         });
     }
-
-    const combinedText = relevantContributions.join('\n');
-    // Assume the first item's index is the start index (or default to 0)
-    const startIndex = originalDebateResponse.Items.find(item => item.ItemType === 'Contribution')?.OrderInSection ?? 0;
 
     let geminiStreamResult: GenerateContentStreamResult | null;
     try {

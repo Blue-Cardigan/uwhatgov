@@ -54,6 +54,13 @@ interface RankedDebate {
     reactionCount: number;
     reactionsByEmoji: { [emoji: string]: number };
     link: string;        // Link to the debate page
+    reactionsBySpeech?: {
+        [speechIndex: number]: {
+            text: string;
+            totalReactions: number;
+            emojis: { [emoji: string]: number };
+        }
+    };
 }
 
 // Updated DashboardData type (matches backend)
@@ -380,7 +387,7 @@ export default function DashboardPage() {
                     <div>
                        <p className="text-sm sm:text-base">
                         Reacted with <span className="inline-block bg-gray-700 px-1.5 py-0.5 rounded text-sm mx-1">{reaction.emoji}</span>
-                        to <span className="font-medium">{reaction.speaker || 'Unknown Speaker'}</span> in "{reaction.debate_title || 'Unknown Debate'}"
+                        to <span className="font-medium">{reaction.speaker || 'Speaker'}</span> in "{reaction.debate_title || 'Unknown Debate'}"
                       </p>
                       {reaction.text && (
                          <p className="text-xs text-gray-400 mt-1 italic">
@@ -479,6 +486,26 @@ export default function DashboardPage() {
                <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z" clipRule="evenodd" />
              </svg>
              Pro Insights: Debates & Speakers
+
+             {/* Export Button */}
+             <div className="ml-auto">
+                 <button
+                   onClick={() => exportToCSV(
+                       // Pass the *filtered* but *unpaginated* data to export
+                       proFilterMode === 'debate' ? filteredDebates : filteredSpeakers,
+                       proFilterMode,
+                       proTimeframe,
+                       dashboardData?.availableEmojis
+                   )}
+                   className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm font-medium rounded-md transition-colors flex items-center gap-1.5"
+                   title={`Export current view (${proFilterMode} - ${proTimeframe}) to CSV`}
+                  >
+                    <svg viewBox="0 0 15 15" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M13.5 3.5H14V3.29289L13.8536 3.14645L13.5 3.5ZM10.5 0.5L10.8536 0.146447L10.7071 0H10.5V0.5ZM6.5 6.5V6H6V6.5H6.5ZM6.5 8.5H6V9H6.5V8.5ZM8.5 8.5H9V8H8.5V8.5ZM8.5 10.5V11H9V10.5H8.5ZM10.5 9.5H10V9.70711L10.1464 9.85355L10.5 9.5ZM11.5 10.5L11.1464 10.8536L11.5 11.2071L11.8536 10.8536L11.5 10.5ZM12.5 9.5L12.8536 9.85355L13 9.70711V9.5H12.5ZM2.5 6.5V6H2V6.5H2.5ZM2.5 10.5H2V11H2.5V10.5ZM2 5V1.5H1V5H2ZM13 3.5V5H14V3.5H13ZM2.5 1H10.5V0H2.5V1ZM10.1464 0.853553L13.1464 3.85355L13.8536 3.14645L10.8536 0.146447L10.1464 0.853553ZM2 1.5C2 1.22386 2.22386 1 2.5 1V0C1.67157 0 1 0.671573 1 1.5H2ZM1 12V13.5H2V12H1ZM2.5 15H12.5V14H2.5V15ZM14 13.5V12H13V13.5H14ZM12.5 15C13.3284 15 14 14.3284 14 13.5H13C13 13.7761 12.7761 14 12.5 14V15ZM1 13.5C1 14.3284 1.67157 15 2.5 15V14C2.22386 14 2 13.7761 2 13.5H1ZM9 6H6.5V7H9V6ZM6 6.5V8.5H7V6.5H6ZM6.5 9H8.5V8H6.5V9ZM8 8.5V10.5H9V8.5H8ZM8.5 10H6V11H8.5V10ZM10 6V9.5H11V6H10ZM10.1464 9.85355L11.1464 10.8536L11.8536 10.1464L10.8536 9.14645L10.1464 9.85355ZM11.8536 10.8536L12.8536 9.85355L12.1464 9.14645L11.1464 10.1464L11.8536 10.8536ZM13 9.5V6H12V9.5H13ZM5 6H2.5V7H5V6ZM2 6.5V10.5H3V6.5H2ZM2.5 11H5V10H2.5V11Z" fill="#ffffff"/>
+                    </svg>
+                    Export CSV
+                 </button>
+             </div>
            </h2>
 
            {/* Filter Controls */}
@@ -527,26 +554,6 @@ export default function DashboardPage() {
                  Show only items with reactions {proEmojiFilter ? `(${proEmojiFilter})` : ''}
                </label>
              </div>
-
-             {/* Export Button */}
-             <div className="ml-auto">
-                 <button
-                   onClick={() => exportToCSV(
-                       // Pass the *filtered* but *unpaginated* data to export
-                       proFilterMode === 'debate' ? filteredDebates : filteredSpeakers,
-                       proFilterMode,
-                       proTimeframe,
-                       dashboardData?.availableEmojis
-                   )}
-                   className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm font-medium rounded-md transition-colors flex items-center gap-1.5"
-                   title={`Export current view (${proFilterMode} - ${proTimeframe}) to CSV`}
-                  >
-                    <svg viewBox="0 0 15 15" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M13.5 3.5H14V3.29289L13.8536 3.14645L13.5 3.5ZM10.5 0.5L10.8536 0.146447L10.7071 0H10.5V0.5ZM6.5 6.5V6H6V6.5H6.5ZM6.5 8.5H6V9H6.5V8.5ZM8.5 8.5H9V8H8.5V8.5ZM8.5 10.5V11H9V10.5H8.5ZM10.5 9.5H10V9.70711L10.1464 9.85355L10.5 9.5ZM11.5 10.5L11.1464 10.8536L11.5 11.2071L11.8536 10.8536L11.5 10.5ZM12.5 9.5L12.8536 9.85355L13 9.70711V9.5H12.5ZM2.5 6.5V6H2V6.5H2.5ZM2.5 10.5H2V11H2.5V10.5ZM2 5V1.5H1V5H2ZM13 3.5V5H14V3.5H13ZM2.5 1H10.5V0H2.5V1ZM10.1464 0.853553L13.1464 3.85355L13.8536 3.14645L10.8536 0.146447L10.1464 0.853553ZM2 1.5C2 1.22386 2.22386 1 2.5 1V0C1.67157 0 1 0.671573 1 1.5H2ZM1 12V13.5H2V12H1ZM2.5 15H12.5V14H2.5V15ZM14 13.5V12H13V13.5H14ZM12.5 15C13.3284 15 14 14.3284 14 13.5H13C13 13.7761 12.7761 14 12.5 14V15ZM1 13.5C1 14.3284 1.67157 15 2.5 15V14C2.22386 14 2 13.7761 2 13.5H1ZM9 6H6.5V7H9V6ZM6 6.5V8.5H7V6.5H6ZM6.5 9H8.5V8H6.5V9ZM8 8.5V10.5H9V8.5H8ZM8.5 10H6V11H8.5V10ZM10 6V9.5H11V6H10ZM10.1464 9.85355L11.1464 10.8536L11.8536 10.1464L10.8536 9.14645L10.1464 9.85355ZM11.8536 10.8536L12.8536 9.85355L12.1464 9.14645L11.1464 10.1464L11.8536 10.8536ZM13 9.5V6H12V9.5H13ZM5 6H2.5V7H5V6ZM2 6.5V10.5H3V6.5H2ZM2.5 11H5V10H2.5V11Z" fill="#ffffff"/>
-                    </svg>
-                    Export CSV
-                 </button>
-             </div>
            </div>
 
 
@@ -583,6 +590,34 @@ export default function DashboardPage() {
                                ))}
                            </div>
                            {debate.link && <Link href={debate.link} className="text-xs text-indigo-400 hover:underline mt-1.5 inline-block">View Debate &rarr;</Link>}
+
+                           {/* --- New Section: Display Reacted Speeches --- */}
+                           {debate.reactionsBySpeech && Object.keys(debate.reactionsBySpeech).length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-gray-600/50 space-y-2">
+                              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Reacted Speeches:</h4>
+                              {Object.entries(debate.reactionsBySpeech)
+                                // Sort by speech index if needed, although order might not be guaranteed by object keys
+                                // .sort(([indexA], [indexB]) => parseInt(indexA) - parseInt(indexB))
+                                .map(([speechIndex, speechData]) => (
+                                <div key={speechIndex} className="pl-2 border-l-2 border-gray-500">
+                                    <p className="text-xs text-gray-300 italic mb-1">
+                                    "{speechData.text}"
+                                    </p>
+                                    <div className="flex flex-wrap gap-x-1 gap-y-0.5">
+                                    {Object.entries(speechData.emojis)
+                                        .filter(([, count]) => count > 0)
+                                        .sort(([, countA], [, countB]) => countB - countA)
+                                        .map(([emoji, count]) => (
+                                        <span key={emoji} className={`text-xs px-1 py-0.5 rounded ${proEmojiFilter === emoji ? 'bg-indigo-500 text-white font-bold' : 'bg-gray-700 text-gray-200'}`}>
+                                            {emoji} {count}
+                                        </span>
+                                    ))}
+                                    </div>
+                                </div>
+                              ))}
+                            </div>
+                           )}
+                           {/* --- End New Section --- */}
                          </div>
                        ))}
                      </div>
@@ -673,7 +708,11 @@ export default function DashboardPage() {
                </div>
              )}
            </div>
+           <Link href="/billing" className="text-xs text-indigo-400 hover:underline mt-1.5 inline-block">
+              Manage Subscription
+           </Link>
         </section>
+
       )}
       {/* --- End Pro Features Section --- */}
 
