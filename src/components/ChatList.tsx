@@ -436,7 +436,7 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                     }}
                     className="p-2 rounded-md bg-[#2a3942] text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer w-full sm:w-auto flex-shrink-0"
                  >
-                    <option value="">Any House</option> {/* Changed default text */}
+                    <option value="">House</option> {/* Changed default text */}
                     <option value="Commons">Commons</option>
                     <option value="Lords">Lords</option>
                  </select>
@@ -483,7 +483,6 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                          </svg>
                        )}
-                       <span className="ml-1 hidden sm:inline">Search</span>
                      </button>
                       {/* Clear Filters Button - Now calls clearAllFilters */}
                       {(searchTerm || startDateFilter || endDateFilter || houseFilter) && (
@@ -493,7 +492,10 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                             className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors text-sm flex items-center justify-center flex-shrink-0"
                             title="Clear search and filters"
                          >
-                            <span className="hidden sm:inline">Clear</span>
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" >
+                              <path d="M8 8L16 16" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                              <path d="M16 8L8 16" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
                             {/* X Icon */}
                             <svg className="sm:hidden w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
