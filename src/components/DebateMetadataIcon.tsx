@@ -72,7 +72,7 @@ const DebateMetadataIcon: React.FC<DebateMetadataIconProps> = ({ metadata, size 
   }
 
   const badgeSize = radius; // Size of the badge circle
-  const badgeFontSize = radius * 0.6;
+  const badgeFontSize = radius * 0.5;
 
   return (
     <div style={{ width: size, height: size }} className="relative flex-shrink-0">

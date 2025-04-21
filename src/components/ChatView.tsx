@@ -10,6 +10,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { escapeRegExp } from '@/utils/stringUtils';
 import { getBaseSpeakerName } from '@/utils/chatUtils';
 import type { Database } from '@/lib/database.types'; // Assuming database types are generated
+import { useMemo } from 'react'; // Add useMemo if not already imported
 
 // Define types locally for the rewritten version
 export interface Speech {
@@ -49,6 +50,14 @@ interface ChatViewProps {
   onRewrittenDebateUpdate: (speeches: Speech[]) => void; // Callback for parent
 }
 
+// Define type for pending updates if not already defined elsewhere
+type PendingUpdateStatus = 'pending' | 'error';
+interface PendingReactionUpdate {
+    emoji: string;
+    action: 'add' | 'remove'; // What the user intended to do
+    status: PendingUpdateStatus;
+}
+
 const ChatView = forwardRef(({
     debateId,
     viewMode,
@@ -82,6 +91,11 @@ const ChatView = forwardRef(({
   const [reactionsMap, setReactionsMap] = useState<Map<number, ReactionSummary[]>>(new Map());
   const reactionChannelRef = useRef<RealtimeChannel | null>(null);
   // --- End Reactions State ---
+
+  // --- NEW: State for Optimistic Updates ---
+  // Map<speechIndex, Map<emoji, PendingReactionUpdate>>
+  const [pendingOptimisticUpdates, setPendingOptimisticUpdates] = useState<Map<number, Map<string, PendingReactionUpdate>>>(new Map());
+  // ---
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
@@ -138,6 +152,8 @@ const ChatView = forwardRef(({
   const fetchAndAggregateReactions = useCallback(async (currentDebateId: string, fetchedUserId: string | null) => { // Renamed arg to avoid conflict
     if (!currentDebateId) {
         setReactionsMap(new Map());
+        // Also clear pending updates if debate changes
+        setPendingOptimisticUpdates(new Map());
         return;
     }
     console.log(`[Reactions] Fetching for debate: ${currentDebateId}`);
@@ -153,6 +169,8 @@ const ChatView = forwardRef(({
     if (error) {
       console.error("[Reactions] Error fetching reactions:", error);
       setReactionsMap(new Map());
+       // Also clear pending updates on fetch error
+       setPendingOptimisticUpdates(new Map());
       return;
     }
 
@@ -192,8 +210,147 @@ const ChatView = forwardRef(({
 
     // console.log('[Reactions] Aggregated map:', newReactionsMap);
     setReactionsMap(newReactionsMap);
+    // *** Clear pending updates after successful fetch, as fetched data is now the source of truth ***
+    setPendingOptimisticUpdates(new Map());
 
   }, [supabase]); // Dependencies: supabase client is stable, no need to add
+
+  // --- REVISED: Helper to derive displayed reactions including optimistic updates ---
+  const getDisplayedReactions = useCallback((speechIndex: number): ReactionSummary[] => {
+    const baseReactions = reactionsMap.get(speechIndex) ?? [];
+    const pendingUpdatesForIndex = pendingOptimisticUpdates.get(speechIndex);
+
+    // Create a map initially populated with base reactions
+    const derivedReactionsMap = new Map(baseReactions.map(r => [r.emoji, { ...r }]));
+
+    // If pending updates exist, apply them, potentially overriding base state
+    if (pendingUpdatesForIndex && pendingUpdatesForIndex.size > 0) {
+        pendingUpdatesForIndex.forEach((update, emoji) => {
+            const baseReaction = derivedReactionsMap.get(emoji); // Get potentially existing reaction from base state
+            const baseCount = baseReaction?.count ?? 0;
+            const baseUserReacted = baseReaction?.userReacted ?? false;
+
+            let derivedCount = baseCount;
+            let derivedUserReacted = baseUserReacted;
+
+            // Apply the pending action regardless of base state to ensure optimistic UI
+            if (update.action === 'add') {
+                // If user didn't already react in the base state, increment count visually
+                if (!baseUserReacted) {
+                    derivedCount = baseCount + 1;
+                }
+                derivedUserReacted = true; // Ensure userReacted is true optimistically
+            } else if (update.action === 'remove') {
+                 // If user did react in the base state, decrement count visually
+                if (baseUserReacted) {
+                    derivedCount = Math.max(0, baseCount - 1);
+                }
+                 derivedUserReacted = false; // Ensure userReacted is false optimistically
+            }
+
+             // Update or add the reaction to the map
+             derivedReactionsMap.set(emoji, {
+                emoji,
+                count: derivedCount,
+                userReacted: derivedUserReacted,
+                // Consider adding status if needed for UI (e.g., dimming on error)
+                // isPending: update.status === 'pending',
+                // hasError: update.status === 'error',
+            });
+        });
+    }
+
+    // Convert map back to array, filter out emojis with zero count AND user not reacting
+    const derivedReactions = Array.from(derivedReactionsMap.values())
+                                  .filter(r => r.count > 0 || r.userReacted) // Keep if count > 0 OR userReacted is true
+                                  .sort((a, b) => a.emoji.localeCompare(b.emoji));
+
+    return derivedReactions;
+  }, [reactionsMap, pendingOptimisticUpdates]);
+  // ---
+
+  // --- REVISED: Handler for Reaction Clicks (with Optimistic Logic) ---
+  const handleReactionOptimistic = useCallback(async (speechIndex: number, emoji: string) => {
+    if (!currentUserId || !debateId || speechIndex === undefined) {
+        console.warn('User not logged in, debateId missing, or speech index missing. Cannot react.');
+        return;
+    }
+
+    // Get current state based on derived reactions to check limits correctly
+    const displayedReactions = getDisplayedReactions(speechIndex);
+    const currentSummary = displayedReactions.find(r => r.emoji === emoji);
+    const currentlyReacted = currentSummary?.userReacted ?? false;
+    const currentUserReactionCount = displayedReactions.reduce((count, reaction) => {
+        // Ensure reaction is valid before accessing userReacted
+        return count + (reaction && reaction.userReacted ? 1 : 0);
+    }, 0);
+
+
+    const MAX_REACTIONS_PER_USER = 2; // Keep limit definition accessible
+
+    // Determine intended action
+    const intendedAction = currentlyReacted ? 'remove' : 'add';
+
+    // --- Reaction Limit Check ---
+    if (intendedAction === 'add' && currentUserReactionCount >= MAX_REACTIONS_PER_USER) {
+        console.log(`User ${currentUserId} already has ${currentUserReactionCount} reactions. Limit reached.`);
+        alert(`You can only add up to ${MAX_REACTIONS_PER_USER} reactions.`);
+        return;
+    }
+    // --- --- ---
+
+    // Set pending state *before* API call
+    setPendingOptimisticUpdates(prevMap => {
+        const newMap = new Map(prevMap);
+        const updatesForIndex = new Map(newMap.get(speechIndex) ?? []);
+        // Ensure we don't override an existing 'error' state back to 'pending' if clicked again quickly
+        const existingPending = updatesForIndex.get(emoji);
+        if (!existingPending || existingPending.status !== 'error') {
+           updatesForIndex.set(emoji, { emoji, action: intendedAction, status: 'pending' });
+           newMap.set(speechIndex, updatesForIndex);
+        }
+        return newMap;
+    });
+
+
+    try {
+        const response = await fetch('/api/react', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ debate_id: debateId, speech_original_index: speechIndex, emoji }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to update reaction');
+        }
+
+        console.log(`Reaction ${result.action}: ${emoji} - API Success`);
+         // On success, DO NOT clear the specific pending update here.
+         // Rely on the fetchAndAggregateReactions triggered by the listener
+         // to eventually clear the *entire* pending map when the source-of-truth is confirmed.
+
+    } catch (error: any) {
+        console.error('Error reacting:', error);
+        // On failure, update the status to 'error'
+        setPendingOptimisticUpdates(prevMap => {
+            const newMap = new Map(prevMap);
+            const updatesForIndex = new Map(newMap.get(speechIndex) ?? []);
+             // Update status to 'error' only if it was previously 'pending'
+             const currentPending = updatesForIndex.get(emoji);
+             if (currentPending && currentPending.status === 'pending') {
+                updatesForIndex.set(emoji, { ...currentPending, status: 'error' });
+                newMap.set(speechIndex, updatesForIndex);
+             }
+            return newMap;
+        });
+        alert(`Failed to ${intendedAction} reaction: ${error.message}`);
+         // Optionally: Set a timeout to clear the 'error' state after a few seconds?
+         // setTimeout(() => { ... clear error logic ... }, 5000);
+    }
+  }, [currentUserId, debateId, getDisplayedReactions, supabase]); // Dependencies
+  // ---
 
   // Effect for reactions fetching and real-time subscription - Updated dependencies
   useEffect(() => {
@@ -219,7 +376,7 @@ const ChatView = forwardRef(({
         { event: '*', schema: 'public', table: 'reactions_uwhatgov', filter: `debate_id=eq.${debateId}` },
         (payload: ReactionPayload) => {
           console.log('[Reactions] Realtime event received:', payload);
-          // Re-fetch using the current user ID from context
+          // Re-fetch. This will also clear pendingOptimisticUpdates implicitly.
           fetchAndAggregateReactions(debateId, currentUserId);
         }
       )
@@ -877,31 +1034,37 @@ const ChatView = forwardRef(({
       return (
         <>
           {rewrittenDebate.speeches?.map((speech: Speech, index: number) => {
-            const itemIndex = speech.originalIndex ?? index; // Use originalIndex if available, fallback to sequential index
-            const baseSpeakerName = getBaseSpeakerName(speech.speaker); // Get base name for map lookup
-            const partyAbbreviation = speakerPartyMap.get(baseSpeakerName); // Get stored party abbreviation from map
-            // --- Get reactions for this speech --- NEW
-            const currentReactions = speech.originalIndex !== undefined
-                ? reactionsMap.get(speech.originalIndex) ?? []
-                : [];
-            // --- ---
+            const itemIndex = speech.originalIndex ?? index;
+            // Ensure itemIndex is valid before proceeding
+            if (typeof itemIndex !== 'number') {
+                console.warn("Invalid itemIndex encountered:", itemIndex, "for speech:", speech);
+                return null; // Skip rendering this bubble if index is invalid
+            }
+
+            const baseSpeakerName = getBaseSpeakerName(speech.speaker);
+            const partyAbbreviation = speakerPartyMap.get(baseSpeakerName);
+
+            // --- Get derived reactions ---
+            const currentReactions = getDisplayedReactions(itemIndex);
+            // ---
 
             return (
                 <MessageBubble
-                    key={`rewritten-${itemIndex}-${index}`} // Improve key uniqueness
+                    key={`rewritten-${itemIndex}-${index}`}
                     speech={speech}
                     onClick={() => handleBubbleClickInternal(speech.originalIndex)}
                     isSelected={selectedOriginalIndex === itemIndex}
                     originalDebate={originalDebateData}
-                    searchQuery={searchQuery} // Pass search query
-                    isHighlighted={highlightedIndex === itemIndex} // Check if this item is highlighted
-                    itemRef={setItemRef(itemIndex)} // Pass ref callback with correct index
-                    partyAbbreviation={partyAbbreviation} // Pass determined party abbreviation (might be undefined/null)
-                    // --- Pass reaction props --- NEW
-                    debateId={debateId} // Pass the debate ID
-                    reactions={currentReactions}
-                    userId={currentUserId} // Use user ID from context
-                    // --- ---
+                    searchQuery={searchQuery}
+                    isHighlighted={highlightedIndex === itemIndex}
+                    itemRef={setItemRef(itemIndex)}
+                    partyAbbreviation={partyAbbreviation}
+                    // --- Pass derived reactions and new handler ---
+                    debateId={debateId}
+                    reactions={currentReactions} // Pass derived reactions
+                    userId={currentUserId}
+                    onReactionClick={handleReactionOptimistic} // Pass the new handler
+                    // ---
                 />
             );
           })}

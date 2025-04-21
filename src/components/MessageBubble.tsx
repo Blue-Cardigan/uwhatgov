@@ -19,7 +19,10 @@ interface MessageBubbleProps {
     debateId: string | null; // Can be null if no debate selected
     reactions: ReactionSummary[];
     userId: string | null;
-    // --- End Reaction Props ---
+    onReactionClick: (speechIndex: number, emoji: string) => Promise<void>; // The handler from ChatView
+    // Optional: Pass down loading/error states if needed
+    // reactionLoadingStates?: Record<string, boolean>;
+    // reactionErrorStates?: Record<string, boolean>;
 }
 
 // Define type for the response from our members API endpoint
@@ -59,7 +62,22 @@ export const HighlightedText = ({ text, query }: { text: string; query: string }
     );
 };
 
-export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, searchQuery, isHighlighted, itemRef, partyAbbreviation, debateId, reactions, userId }: MessageBubbleProps) => {
+export const MessageBubble = ({
+    speech,
+    onClick,
+    isSelected,
+    originalDebate,
+    searchQuery,
+    isHighlighted,
+    itemRef,
+    partyAbbreviation,
+    debateId,
+    reactions, // Receive the derived reactions
+    userId,
+    onReactionClick, // Receive the handler
+    // reactionLoadingStates, // Receive optional states
+    // reactionErrorStates,
+}: MessageBubbleProps) => {
     const isOwnMessage = false;
     const memberId = (typeof speech.originalIndex === 'number' && originalDebate?.Items)
         ? originalDebate.Items.find(item => item.OrderInSection === speech.originalIndex)?.MemberId
@@ -170,13 +188,12 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
     };
     // --- --- ---
 
-    // --- Simple Reaction Display (for unauthenticated users) --- RE-ADDED
+    // --- Simple Reaction Display (for unauthenticated users) ---
     const SimpleReactionDisplay = () => {
-        // Filter reactions to only show those with count > 0
+       // Filter reactions to only show those with count > 0
         const visibleReactions = reactions.filter(r => r.count > 0);
         if (visibleReactions.length === 0) return null; // Don't render if no reactions have counts > 0
-
-        return (
+         return (
             <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
                 <div className="max-w-xs sm:max-w-sm md:max-w-md flex space-x-1 mt-1">
                     {visibleReactions.map(({ emoji, count }) => (
@@ -256,21 +273,24 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
             </div>
 
             {/* --- Conditional Reaction Display --- */}
-            {/* Logic: Authenticated users see ReactionBar if selected OR has reactions. */}
-            {/* Unauthenticated users see disabled ReactionBar ONLY if selected, */}
-            {/* otherwise see SimpleReactionDisplay if it has reactions */}
+            {/* The conditions here should now work correctly with optimistic `reactions` prop */}
             {speech.originalIndex !== undefined && debateId && (
                 <>
                     {userId ? (
-                        // Authenticated User
+                        // Authenticated User: Render if selected OR if reactions exist (now includes optimistic ones)
                         (isSelected || reactions.length > 0) && (
                             <div className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1`}>
                                 <div className="max-w-xs sm:max-w-sm md:max-w-md">
                                     <ReactionBar
-                                        debateId={debateId}
-                                        speechOriginalIndex={speech.originalIndex}
-                                        reactions={reactions}
+                                        // Pass necessary props, removing state logic props
+                                        speechOriginalIndex={speech.originalIndex} // Keep index for context if needed inside bar
+                                        reactions={reactions} // Pass down the derived reactions
                                         userId={userId}
+                                        // The actual click logic is handled by the passed handler
+                                        onReactionClick={(emoji) => speech.originalIndex !== undefined && onReactionClick(speech.originalIndex, emoji)}
+                                        // Pass loading/error states if provided
+                                        // isLoading={reactionLoadingStates}
+                                        // errorEmoji={reactionErrorStates ? Object.keys(reactionErrorStates)[0] : null} // Example: pass first error emoji
                                     />
                                 </div>
                             </div>
@@ -278,17 +298,18 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                     ) : (
                         // Unauthenticated User
                         isSelected ? (
-                            // Show disabled ReactionBar when selected
+                             // Show disabled ReactionBar when selected
                             <div
-                                ref={reactionContainerRef} // Attach the new ref here
+                                ref={reactionContainerRef}
                                 className={`flex w-full ${isOwnMessage ? 'justify-end' : 'justify-start pl-10 pr-0 sm:pl-10 sm:pr-0'} -mt-1 relative`}
                             >
                                 <div className="max-w-xs sm:max-w-sm md:max-w-md">
+                                     {/* Pass null handler or disable interaction */}
                                     <ReactionBar
-                                        debateId={debateId}
                                         speechOriginalIndex={speech.originalIndex}
-                                        reactions={reactions}
-                                        userId={null} // Pass null to disable
+                                        reactions={reactions.filter(r => r.count > 0)} // Show only existing counts
+                                        userId={null} // Pass null to disable interaction
+                                        onReactionClick={() => {}} // No-op handler
                                         onMouseEnter={() => setisSignUpPopoverVisible(true)}
                                         onMouseLeave={() => setisSignUpPopoverVisible(false)}
                                     />
@@ -301,7 +322,7 @@ export const MessageBubble = ({ speech, onClick, isSelected, originalDebate, sea
                             </div>
                         ) : (
                             // Show SimpleReactionDisplay when not selected but has reactions
-                            reactions.length > 0 && <SimpleReactionDisplay />
+                             reactions.length > 0 && <SimpleReactionDisplay /> // Simple display uses same reactions prop
                         )
                     )}
                 </>
