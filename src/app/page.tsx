@@ -511,9 +511,39 @@ export default function Home() {
                          <button
                              onClick={() => {
                                  if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) return;
+                                 if (!selectedDebateId) {
+                                     console.warn("[handleRegenerate] No debate selected, cannot regenerate.");
+                                     return;
+                                 }
                                  console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
                                  setIsRegenerating(true);
-                                 fetchOriginalDebate(selectedDebateId);
+                                 
+                                 // Clear memory cache
+                                 originalDebateCache.current.delete(selectedDebateId);
+                                 console.log(`[handleRegenerate] Cleared memory cache for ${selectedDebateId}`);
+
+                                 // Clear localStorage
+                                 const localStorageKey = ORIGINAL_DEBATE_CACHE_PREFIX + selectedDebateId;
+                                 try {
+                                     localStorage.removeItem(localStorageKey);
+                                     console.log(`[handleRegenerate] Cleared localStorage for ${selectedDebateId}`);
+                                 } catch (error) {
+                                     console.error(`[handleRegenerate] Error removing localStorage item ${localStorageKey}:`, error);
+                                 }
+
+                                 // Clear potentially stale rewritten data ref
+                                 rewrittenDebateRef.current = null;
+
+                                 // Reset original item view in case it was open
+                                 setSelectedOriginalIndex(null);
+
+                                 // Trigger the stream in ChatView
+                                 chatViewRef.current?.triggerStream();
+                                 console.log(`[handleRegenerate] Triggered stream for ${selectedDebateId}`);
+                                 
+                                 // Note: We need a mechanism (e.g., a callback prop from ChatView)
+                                 // to set isRegenerating back to false when the stream completes or fails.
+                                 // For now, it remains true until navigation/reload.
                              }}
                              className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isRegenerating ? 'animate-spin' : ''}`}
                              title="Regenerate Casual Version"
