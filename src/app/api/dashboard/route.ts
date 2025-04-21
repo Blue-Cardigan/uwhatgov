@@ -93,7 +93,7 @@ type ReactionRow = Database['public']['Tables']['reactions_uwhatgov']['Row'];
 // Define the base Row type for members
 type MemberRow = Database['public']['Tables']['members']['Row'];
 // Define the base Row type for subscriptions
-type SubscriptionRow = Database['public']['Tables']['subscriptions']['Row'];
+// type SubscriptionRow = Database['public']['Tables']['subscriptions']['Row'];
 
 // Helper function to get start date for 'daily', 'weekly', and 'monthly'
 const getStartDate = (period: 'daily' | 'weekly' | 'monthly'): Date => {

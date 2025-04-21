@@ -560,7 +560,7 @@ export default function DashboardPage() {
                           {/* Show breakdown by emoji */}
                          <div className="flex flex-wrap gap-x-2 gap-y-1">
                              {speaker.reactionsByEmoji && Object.entries(speaker.reactionsByEmoji)
-                               .filter(([emoji, count]) => count > 0)
+                               .filter(([, count]) => count > 0)
                                .sort(([, countA], [, countB]) => countB - countA)
                                .map(([emoji, count]) => (
                                   <span key={emoji} className={`text-xs px-1.5 py-0.5 rounded ${proEmojiFilter === emoji ? 'bg-indigo-500 text-white font-bold' : 'bg-gray-600 text-gray-200'}`}>
