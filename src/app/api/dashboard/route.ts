@@ -134,7 +134,7 @@ export async function GET() {
     // === Fetch Data ===
 
     // 1. Fetch User Subscription Status (to determine if Pro)
-    let isProUser = true;
+    const isProUser = true;
     // try {
     //     const { data: subscriptionData, error: subscriptionError } = await supabase
     //         .from('subscriptions')
