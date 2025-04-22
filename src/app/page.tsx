@@ -434,7 +434,7 @@ export default function Home() {
       {/* Sidebar */}
       <div
         className={`
-          ${selectedDebateId ? 'hidden md:flex' : 'flex'}
+          hidden md:flex // Always hidden on mobile, flex on desktop+
           w-full md:w-2/5 border-r border-gray-700 flex-col bg-[#111b21]
         `}
       >
@@ -472,7 +472,7 @@ export default function Home() {
       {/* Main Chat View Area - Hidden on mobile if NO chat is selected */}
       <div
         className={`
-          ${selectedDebateId ? 'flex' : 'hidden md:flex'}
+          flex // Always flex, content inside determines visibility
           flex-grow flex-col bg-[#0b141a] overflow-hidden relative
         `}
         style={!selectedDebateId ? {
