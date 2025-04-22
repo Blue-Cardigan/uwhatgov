@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 // Success Icon Component
@@ -11,8 +11,8 @@ const SuccessIcon = () => (
   </svg>
 );
 
-// Basic success page
-const PaymentSuccessPage = () => {
+// Extracted client component that uses useSearchParams
+const PaymentSuccessContent = () => {
   const searchParams = useSearchParams();
   const session_id = searchParams?.get('session_id');
 
@@ -20,8 +20,6 @@ const PaymentSuccessPage = () => {
     if (session_id) {
       console.log('Checkout Session ID:', session_id);
       // Optional: Verify session status with your backend
-      // You could make a request here to a backend endpoint 
-      // that verifies the session ID with Stripe and confirms fulfillment.
       // fetch('/api/stripe/verify-session', { method: 'POST', body: JSON.stringify({ session_id }) })
       //  .then(res => res.json())
       //  .then(data => console.log('Verification result:', data));
@@ -29,20 +27,37 @@ const PaymentSuccessPage = () => {
   }, [session_id]);
 
   return (
+    <div className="bg-[#202c33] rounded-lg shadow-lg p-8 max-w-sm w-full">
+      <SuccessIcon />
+      <h1 className="text-2xl font-bold text-green-400 mb-2">Payment Successful!</h1>
+      <p className="text-base mb-6 text-gray-300">Thank you for subscribing to the Pro plan.</p>
+      {session_id && (
+        <p className="text-xs text-gray-400 mb-4">Session ID: <span className="font-mono">{session_id}</span></p>
+      )}
+      {/* Consistent link style */}
+      <Link href="/dashboard" className="text-indigo-400 hover:text-indigo-300 hover:underline text-sm">
+        Go back to Dashboard
+      </Link>
+    </div>
+  );
+};
+
+// Loading Fallback Component
+const LoadingFallback = () => (
+  <div className="bg-[#202c33] rounded-lg shadow-lg p-8 max-w-sm w-full text-center">
+    <p className="text-gray-300">Loading payment details...</p>
+  </div>
+);
+
+// Main page component - No longer needs 'use client' directly
+const PaymentSuccessPage = () => {
+  return (
     // Use the darker chat background, center content
     <div className="container mx-auto p-8 text-center bg-[#0b141a] text-gray-200 min-h-screen flex flex-col justify-center items-center">
-      <div className="bg-[#202c33] rounded-lg shadow-lg p-8 max-w-sm w-full">
-        <SuccessIcon />
-        <h1 className="text-2xl font-bold text-green-400 mb-2">Payment Successful!</h1>
-        <p className="text-base mb-6 text-gray-300">Thank you for subscribing to the Pro plan.</p>
-        {session_id && (
-          <p className="text-xs text-gray-400 mb-4">Session ID: <span className="font-mono">{session_id}</span></p>
-        )}
-        {/* Consistent link style */}
-        <Link href="/dashboard" className="text-indigo-400 hover:text-indigo-300 hover:underline text-sm">
-          Go back to Dashboard
-        </Link>
-      </div>
+      {/* Wrap the client component in Suspense */}
+      <Suspense fallback={<LoadingFallback />}>
+        <PaymentSuccessContent />
+      </Suspense>
     </div>
   );
 };
