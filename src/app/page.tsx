@@ -107,6 +107,10 @@ export default function Home() {
     chatViewRef,        // Pass ChatView ref for scrolling
   });
 
+  // --- NEW: State for Mobile Sidebar Toggle ---
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  // ---
+
   // Function to handle regeneration request
   const handleRegenerate = useCallback(() => {
     if (!window.confirm("Are you sure you want to regenerate this debate? This will replace the current casual version.")) return;
@@ -329,6 +333,10 @@ export default function Home() {
       setSelectedOriginalIndex(null);
       closeDebateSearch(); // Use the function from the hook
       router.push('/');
+
+      // --- Close mobile sidebar on deselect ---
+      setIsMobileSidebarOpen(false);
+      // ---
       return;
     }
 
@@ -347,6 +355,10 @@ export default function Home() {
     setIsSummaryOpen(false);
     setIsOptionsMenuOpen(false); // Close options menu on new debate select
 
+    // --- Close mobile sidebar on select ---
+    setIsMobileSidebarOpen(false);
+    // ---
+
     router.push(`/?debateId=${debateId}`);
     fetchSelectedDebateMetadata(debateId);
     fetchOriginalDebate(debateId);
@@ -356,9 +368,17 @@ export default function Home() {
 
   // Specific handler for selection coming *from* the ChatList component
   const handleSelectDebateFromList = useCallback((debateSummary: InternalDebateSummary) => {
+    // --- NEW: Close sidebar if same debate is tapped on mobile ---
+    if (debateSummary.id === selectedDebateId && isMobileSidebarOpen) {
+      setIsMobileSidebarOpen(false);
+      return;
+    }
+    // ---
+
+    // Existing logic for selecting a *new* debate
     setSelectedDebateSummary(debateSummary);
     handleDebateSelect(debateSummary.id);
-  }, [handleDebateSelect]);
+  }, [handleDebateSelect, selectedDebateId, isMobileSidebarOpen]); // Added dependencies
 
   // Effect to update selectedDebateMetadata state when the cache changes for the selected ID
   useEffect(() => {
@@ -434,8 +454,10 @@ export default function Home() {
       {/* Sidebar */}
       <div
         className={`
-          hidden md:flex // Always hidden on mobile, flex on desktop+
+          ${isMobileSidebarOpen ? 'flex' : 'hidden'}
+          md:flex
           w-full md:w-2/5 border-r border-gray-700 flex-col bg-[#111b21]
+          absolute md:relative h-full z-20 // Absolute position for mobile overlay
         `}
       >
         {/* Sidebar Header - Render conditionally */}
@@ -472,7 +494,8 @@ export default function Home() {
       {/* Main Chat View Area - Hidden on mobile if NO chat is selected */}
       <div
         className={`
-          flex // Always flex, content inside determines visibility
+          ${isMobileSidebarOpen ? 'hidden' : 'flex'} // Hide if mobile sidebar is open
+          md:flex // Always flex on desktop+
           flex-grow flex-col bg-[#0b141a] overflow-hidden relative
         `}
         style={!selectedDebateId ? {
@@ -507,9 +530,9 @@ export default function Home() {
                    <div className="flex items-center gap-3 min-w-0 flex-1"> {/* Added flex-1 */}
                      {/* Back Button (Mobile Only) */}
                      <button
-                        onClick={() => handleDebateSelect(null)}
+                        onClick={() => setIsMobileSidebarOpen(true)}
                         className="md:hidden mr-1 p-1 text-gray-400 hover:text-white"
-                        aria-label="Back to chat list"
+                        aria-label="Open chat list"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                           <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
@@ -718,6 +741,18 @@ export default function Home() {
              <div className="text-center bg-[#0b141a] bg-opacity-80 p-10 rounded-lg">
                <h2 className="text-3xl mt-6 text-gray-300 font-light">UWhatGov</h2>
                <p className="my-4 text-sm text-gray-500">View parliamentary debates<br/>formatted like your favourite chat app.</p>
+               {/* --- NEW: Mobile Sidebar Toggle Button --- */}
+               {!selectedDebateId && (
+                 <button
+                   onClick={() => setIsMobileSidebarOpen(true)}
+                   className="md:hidden absolute top-4 left-4 p-2 text-gray-400 bg-[#202c33] rounded-md hover:bg-gray-700 hover:text-white transition-colors"
+                   aria-label="Open sidebar"
+                 >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                    <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
+                  </svg>
+                 </button>
+               )}
                <Image
                  src="/whatguv.svg"
                  alt="UWhatGov Logo"
@@ -729,22 +764,26 @@ export default function Home() {
              </div>
              {/* Subtle Logout Button in Corner (only if user logged in) */}
              {!authLoading && user && (
-                <button
-                    onClick={handleLogout}
-                    className="absolute bottom-4 right-4 px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
-                    title={`Sign out ${user.email}`}
-                >
-                    Sign Out
-                </button>
+                <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2">
+                  <button
+                      onClick={handleLogout}
+                      className="px-3 py-1 text-xs text-gray-500 bg-[#202c33] rounded hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                      title={`Sign out ${user.email}`}
+                  >
+                      Sign Out
+                  </button>
+                </div>
              )}
-             {/* Dashboard Link on Placeholder */} 
+             {/* Dashboard Link in Corner (only if user logged in) */}
              {!authLoading && user && (
-               <Link
-                   href="/dashboard"
-                   className="absolute top-4 left-4 px-3 py-1 text-xs text-indigo-400 bg-[#202c33] rounded hover:bg-gray-700 hover:text-indigo-300 transition-colors"
-               >
-                   View Dashboard
-                </Link>
+               <div className="absolute bottom-4 left-4 flex flex-col items-start gap-2">
+                 <Link
+                     href="/dashboard"
+                     className="px-3 py-1 text-xs text-indigo-400 bg-[#202c33] rounded hover:bg-gray-700 hover:text-indigo-300 transition-colors"
+                 >
+                     Dashboard
+                  </Link>
+               </div>
              )}
           </div>
         )}
