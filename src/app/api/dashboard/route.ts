@@ -139,8 +139,8 @@ const parseDebateContent = (contentString: string | null, debateId: string): { t
         const speeches = Array.isArray(parsed.speeches) ? parsed.speeches : [];
         // Basic validation for speeches structure could be added here if needed
         return { title, speeches };
-    } catch (e) {
-        // console.error(`Error parsing content JSON for debate ${debateId}:`, e);
+    } catch (_e) {
+        // console.error(`Error parsing content JSON for debate ${debateId}:`, _e);
         return { title: `Content Error: ${debateId}`, speeches: [] };
     }
 };
