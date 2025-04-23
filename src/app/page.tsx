@@ -38,6 +38,8 @@ const OriginalIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 const OptionsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M10 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM10 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM11.5 15.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z" /></svg>;
 // Regenerate/Refresh icon
 const RefreshIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M20.944 12.979c-.489 4.509-4.306 8.021-8.944 8.021-2.698 0-5.112-1.194-6.763-3.075l1.245-1.633C7.787 17.969 9.695 19 11.836 19c3.837 0 7.028-2.82 7.603-6.5h-2.125l3.186-4.5 3.186 4.5h-2.742zM12 5c2.2 0 4.157.996 5.445 2.553l-1.31 1.548C14.98 7.725 13.556 7 12 7c-3.837 0-7.028 2.82-7.603 6.5h2.125l-3.186 4.5L.15 13.5h2.742C3.38 8.991 7.196 5 12 5z" clipRule="evenodd" /></svg>;
+// Chevron Down Icon
+const ChevronDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" /></svg>;
 
 // localStorage Keys
 const METADATA_CACHE_PREFIX = 'uwhatgov_metadata_';
@@ -432,7 +434,7 @@ export default function Home() {
   }, []); // No dependencies needed, it only updates a ref
 
   return (
-    <main className="flex h-screen w-screen bg-[#111b21] text-white overflow-hidden relative">
+    <main className="flex h-dvh w-screen bg-[#111b21] text-white overflow-hidden relative">
       {/* Auth Modal Overlay - Conditionally Rendered */}
       {isAuthModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
@@ -526,17 +528,33 @@ export default function Home() {
                {/* Default Header View */}
                {!searchIsOpen && (
                  <>
-                   {/* Left Side */}
-                   <div className="flex items-center gap-3 min-w-0 flex-1"> {/* Added flex-1 */}
+                   {/* Left Side - Made clickable for summary toggle */}
+                   <div
+                     className={`flex items-center gap-3 min-w-0 flex-1 cursor-pointer ${
+                       !selectedDebateId || isRegenerating || !summaryText
+                         ? 'opacity-70 pointer-events-none' // Add disabled appearance and prevent clicks
+                         : ''
+                     }`}
+                     onClick={() => {
+                       // Only toggle if not disabled
+                       if (selectedDebateId && !isRegenerating && summaryText) {
+                         setIsSummaryOpen(prev => !prev);
+                       }
+                     }}
+                     title={isSummaryOpen ? "Hide Summary" : "Show Summary"}
+                   >
                      {/* Back Button (Mobile Only) */}
                      <button
-                        onClick={() => setIsMobileSidebarOpen(true)}
-                        className="md:hidden mr-1 p-1 text-gray-400 hover:text-white"
-                        aria-label="Open chat list"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                          <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
-                        </svg>
+                       onClick={(e) => {
+                         e.stopPropagation(); // Prevent header click
+                         setIsMobileSidebarOpen(true);
+                       }}
+                       className="md:hidden mr-1 p-1 text-gray-400 hover:text-white"
+                       aria-label="Open chat list"
+                     >
+                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                         <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
+                       </svg>
                      </button>
                      {/* DebateMetadataIcon */}
                      <DebateMetadataIcon
@@ -549,8 +567,20 @@ export default function Home() {
                        size={40} // Standard avatar size
                      />
                      <div className="flex flex-col min-w-0"> {/* Added min-w-0 */}
-                       <h2 className="text-md font-semibold text-gray-100 truncate" title={selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}>
+                       <h2 className="text-md font-semibold text-gray-100 truncate flex items-center gap-1" title={selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}>
                          {selectedDebateSummary?.title || originalDebate?.Overview?.Title || 'Loading...'}
+                         {/* Summary Toggle Chevron Button (Moved) */}
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation(); // Prevent wrapper div click from firing
+                             setIsSummaryOpen(prev => !prev);
+                           }}
+                           className={`p-0.5 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isSummaryOpen ? 'bg-gray-700 text-white rotate-180' : ''} transition-transform duration-200`}
+                           title={isSummaryOpen ? "Hide Summary" : "Show Summary"}
+                           disabled={!selectedDebateId || isRegenerating || !summaryText} // Disable if no summary text yet
+                         >
+                           <ChevronDownIcon />
+                         </button>
                        </h2>
                        <span className="text-xs text-gray-400">
                          {selectedDebateSummary?.house || originalDebate?.Overview?.House || '...'}
@@ -601,18 +631,6 @@ export default function Home() {
                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" /></svg>
                          </button>
                      )}
-
-                     {/* Summary Toggle Button */} 
-                     <button
-                         onClick={() => setIsSummaryOpen(prev => !prev)} // Toggle dropdown
-                         className={`p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${isSummaryOpen ? 'bg-gray-700 text-white' : ''}`}
-                         title={isSummaryOpen ? "Hide Summary" : "Show Summary"}
-                         disabled={!selectedDebateId || isRegenerating}
-                     >
-                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                             <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A.75.75 0 0 0 10 14.25a.75.75 0 0 0 .75-.75v-.654a.25.25 0 0 1 .244-.304l.459-2.066A.75.75 0 0 0 10.253 9H9Z" clipRule="evenodd" />
-                         </svg>
-                     </button>
 
                      {/* Options Dropdown Button ('Three Dots') */}
                      <button
