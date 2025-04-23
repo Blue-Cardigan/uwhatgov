@@ -450,8 +450,12 @@ Text: ${item.text}
     // Start the piping process in the background. DO NOT await this.
     pipeGeneratorToStream();
 
+    // Encode the string output of the transform stream to bytes (UTF-8)
+    const encodedStream = transformStream.readable.pipeThrough(new TextEncoderStream());
+
     // Return the readable side of the transform stream to the client immediately
-    return new Response(transformStream.readable, {
+    // Use the encoded stream which yields Uint8Arrays
+    return new Response(encodedStream, {
         headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-transform', // Ensure no caching/transform
