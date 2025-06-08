@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useState, useCallback, useRef, Suspense, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image'; // Import Next Image
 import Link from 'next/link'; // Import Link
@@ -12,7 +12,7 @@ import DebateMetadataIcon from '@/components/DebateMetadataIcon'; // Import the 
 import { AuthForm } from '@/components/AuthForm'; // Import AuthForm
 import DebateInitializer from '@/components/DebateInitializer'; // Import the new component
 import SummaryViewer from '@/components/SummaryViewer'; // Import new component
-import OriginalDebateViewer from '@/components/OriginalDebateViewer'; // Import new component
+import OriginalContribution from '@/components/OriginalContribution'; // Import updated component
 import SearchHeader from '@/components/SearchHeader'; // Import new component
 import CookieConsentBanner from '@/components/CookieConsentBanner'; // Import cookie banner
 
@@ -24,6 +24,7 @@ import { Speech } from '@/components/ChatView'; // Import Speech type
 // Import context hook
 import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 import { useDebateSearch } from '@/hooks/useDebateSearch'; // Import new hook
+import { useDataCache } from '@/hooks/useDataCache';
 
 // Define type for the ChatView ref methods
 interface ChatViewHandle {
@@ -41,20 +42,24 @@ const RefreshIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2
 // Chevron Down Icon
 const ChevronDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" /></svg>;
 
-// localStorage Keys
-const METADATA_CACHE_PREFIX = 'uwhatgov_metadata_';
-const ORIGINAL_DEBATE_CACHE_PREFIX = 'uwhatgov_original_';
-
 export default function Home() {
   const router = useRouter();
   const chatViewRef = useRef<ChatViewHandle>(null); // Ref for ChatView scrolling and triggering
   const { user, loading: authLoading, logout, isProUser } = useAuth(); // Get auth state
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false); // State for Auth Modal
 
-  // Caches stored in refs/state
-  // Metadata cache uses state to trigger re-renders when items are added/updated for ChatList
-  const [metadataCache, setMetadataCache] = useState<Record<string, DebateMetadata>>({});
-  const originalDebateCache = useRef<Map<string, DebateResponse>>(new Map());
+  // Initialize caching hooks
+  const originalDebateCache = useDataCache<DebateResponse>({
+    keyPrefix: 'uwhatgov_original_',
+    memoryCache: true,
+    localStorageCache: true,
+  });
+
+  const metadataCache = useDataCache<DebateMetadata>({
+    keyPrefix: 'uwhatgov_metadata_',
+    memoryCache: false, // Use state-based cache for metadata to trigger re-renders
+    localStorageCache: true,
+  });
 
   // Chat List state
   const [selectedDebateId, setSelectedDebateId] = useState<string | null>(null);
@@ -63,20 +68,9 @@ export default function Home() {
   // View Mode state
   const [viewMode, setViewMode] = useState<'rewritten' | 'original'>('rewritten');
 
-  // Original Debate data state
-  const [originalDebate, setOriginalDebate] = useState<DebateResponse | null>(null);
-  const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
-  const [errorOriginal, setErrorOriginal] = useState<string | null>(null);
-
-  // Selected Debate Metadata state
-  const [selectedDebateMetadata, setSelectedDebateMetadata] = useState<DebateMetadata | null>(null);
-  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
-  const [errorMetadata, setErrorMetadata] = useState<string | null>(null);
-
   // Resizable Panel state
-  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null); // Moved from ChatView
-  const [originalPanelHeight, setOriginalPanelHeight] = useState(192); // Moved from ChatView, default height (12rem)
-  // State for regeneration loading
+  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(null);
+  const [originalPanelHeight, setOriginalPanelHeight] = useState(43);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Ref for the rewritten debate data used in search
@@ -90,6 +84,7 @@ export default function Home() {
 
   // State for Header Options Dropdown
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
+
   // Use the custom hook for search state and logic
   const {
     isSearchOpen: searchIsOpen,
@@ -104,14 +99,45 @@ export default function Home() {
     closeSearch: closeDebateSearch,
   } = useDebateSearch({
     viewMode,
-    originalDebate,
-    rewrittenDebateRef, // Pass the ref
-    chatViewRef,        // Pass ChatView ref for scrolling
+    originalDebate: selectedDebateId ? originalDebateCache.getCachedData(selectedDebateId).data : null,
+    rewrittenDebateRef,
+    chatViewRef,
   });
 
-  // --- NEW: State for Mobile Sidebar Toggle ---
+  // State for Mobile Sidebar Toggle
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  // ---
+
+  // Get current debate data from caches only when selectedDebateId changes
+  const originalDebateState = selectedDebateId ? originalDebateCache.getCachedData(selectedDebateId) : { data: null, isLoading: false, error: null };
+  const metadataState = selectedDebateId ? metadataCache.getCachedData(selectedDebateId) : { data: null, isLoading: false, error: null };
+  const originalDebate = originalDebateState.data;
+
+  // Create API fetcher functions
+  const fetchOriginalDebateFromAPI = useCallback(async (debateId: string): Promise<DebateResponse> => {
+    const response = await fetch(`/api/hansard/debates/${debateId}`);
+    if (!response.ok) {
+      let errorMsg = `Original fetch failed: ${response.status}`;
+      try { 
+        const errorData = await response.json(); 
+        errorMsg = errorData.error || errorData.message || errorMsg; 
+      } catch (_e) {}
+      throw new Error(errorMsg);
+    }
+    return response.json();
+  }, []);
+
+  const fetchMetadataFromAPI = useCallback(async (debateId: string): Promise<DebateMetadata> => {
+    const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
+    if (!response.ok) {
+      let errorMsg = `Metadata fetch failed: ${response.status}`;
+      try { 
+        const errorData = await response.json(); 
+        errorMsg = errorData.error || errorMsg; 
+      } catch (_e) {}
+      throw new Error(errorMsg);
+    }
+    return response.json();
+  }, []);
 
   // Function to handle regeneration request
   const handleRegenerate = useCallback(() => {
@@ -122,21 +148,11 @@ export default function Home() {
     }
     console.log(`[handleRegenerate] Starting regeneration for ${selectedDebateId}`);
     setIsRegenerating(true);
-    setIsOptionsMenuOpen(false); // Close menu
+    setIsOptionsMenuOpen(false);
     
-    // Clear memory cache
-    originalDebateCache.current.delete(selectedDebateId);
-    console.log(`[handleRegenerate] Cleared memory cache for ${selectedDebateId}`);
-
-    // Clear localStorage
-    const localStorageKey = ORIGINAL_DEBATE_CACHE_PREFIX + selectedDebateId;
-    try {
-        localStorage.removeItem(localStorageKey);
-        console.log(`[handleRegenerate] Cleared localStorage for ${selectedDebateId}`);
-    } catch (error) {
-        console.error(`[handleRegenerate] Error removing localStorage item ${localStorageKey}:`, error);
-    }
-
+    // Clear caches
+    originalDebateCache.clearCache(selectedDebateId);
+    
     // Clear potentially stale rewritten data ref
     rewrittenDebateRef.current = null;
 
@@ -146,150 +162,7 @@ export default function Home() {
     // Trigger the stream in ChatView
     chatViewRef.current?.triggerStream();
     console.log(`[handleRegenerate] Triggered stream for ${selectedDebateId}`);
-    
-    // Note: Need ChatView callback to reset isRegenerating on completion/failure.
-  }, [selectedDebateId]);
-
-  // Fetch Original Debate Data (incorporates memory & localStorage caching)
-  const fetchOriginalDebate = useCallback(async (debateId: string | null) => {
-      if (!debateId) return;
-
-      // 1. Check memory cache first
-      if (originalDebateCache.current.has(debateId)) {
-          const cachedData = originalDebateCache.current.get(debateId)!;
-          console.log(`[fetchOriginalDebate] Memory Cache HIT for original debate ${debateId}`);
-          setOriginalDebate(cachedData);
-          setIsLoadingOriginal(false);
-          setErrorOriginal(null);
-          return;
-      }
-
-      // 2. Check localStorage
-      const localStorageKey = ORIGINAL_DEBATE_CACHE_PREFIX + debateId;
-      try {
-          const storedData = localStorage.getItem(localStorageKey);
-          if (storedData) {
-              const parsedData: DebateResponse = JSON.parse(storedData);
-              console.log(`[fetchOriginalDebate] localStorage HIT for original debate ${debateId}`);
-              originalDebateCache.current.set(debateId, parsedData); // Update memory cache
-              setOriginalDebate(parsedData);
-              setIsLoadingOriginal(false);
-              setErrorOriginal(null);
-              return;
-          }
-      } catch (error) {
-          console.error(`[fetchOriginalDebate] Error reading/parsing localStorage for ${debateId}:`, error);
-          // Optional: Clear the corrupted item
-          // localStorage.removeItem(localStorageKey);
-      }
-
-      // Prevent concurrent fetches if already loading (simple check)
-      if (isLoadingOriginal) {
-        console.log(`[fetchOriginalDebate] Fetch already in progress for original debate, skipping.`);
-        return;
-      }
-
-      // 3. Fetch from API
-      console.log(`[fetchOriginalDebate] Cache MISS. Fetching ORIGINAL debate ${debateId} from API`);
-      setIsLoadingOriginal(true);
-      setErrorOriginal(null);
-      setOriginalDebate(null); // Clear potentially stale data
-
-      try {
-        const hansardApiUrl = `/api/hansard/debates/${debateId}`;
-        const response = await fetch(hansardApiUrl);
-        if (!response.ok) {
-          let errorMsg = `Original fetch failed: ${response.status}`;
-          try { const errorData = await response.json(); errorMsg = errorData.error || errorData.message || errorMsg; } catch (_e) {}
-          throw new Error(errorMsg);
-        }
-        const data: DebateResponse = await response.json();
-        console.log(`[fetchOriginalDebate] Fetched data for ${debateId}, caching.`);
-
-        // Store in localStorage
-        try {
-            localStorage.setItem(localStorageKey, JSON.stringify(data));
-        } catch (error) {
-            console.error(`[fetchOriginalDebate] Error writing to localStorage for ${debateId}:`, error);
-        }
-
-        originalDebateCache.current.set(debateId, data); // Store in memory cache
-        setOriginalDebate(data); // Set state
-
-      } catch (e: any) {
-        console.error(`[fetchOriginalDebate] Failed fetch original ${debateId}:`, e);
-        setErrorOriginal(`Failed load original: ${e.message}`);
-        setOriginalDebate(null);
-      } finally {
-        setIsLoadingOriginal(false);
-      }
-    }, [isLoadingOriginal]);
-
-  // Fetch Metadata for Selected Debate (incorporates memory & localStorage caching, updates state)
-  const fetchSelectedDebateMetadata = useCallback(async (debateId: string) => {
-
-      // 1. Check state cache first
-      if (metadataCache[debateId]) {
-          if (metadataCache[debateId].isLoading || metadataCache[debateId].error) {
-             setMetadataCache(prev => ({ ...prev, [debateId]: { ...prev[debateId], isLoading: false, error: null } }));
-          }
-          return;
-      }
-
-      // 2. Check localStorage
-      const localStorageKey = METADATA_CACHE_PREFIX + debateId;
-      try {
-          const storedData = localStorage.getItem(localStorageKey);
-          if (storedData) {
-              const parsedData: DebateMetadata = JSON.parse(storedData);
-              console.log(`[fetchMetadata] localStorage HIT for metadata ${debateId}`);
-              // Update state cache directly from localStorage
-              setMetadataCache(prev => ({ ...prev, [debateId]: { ...parsedData, isLoading: false, error: null } }));
-              return;
-          }
-      } catch (error) {
-          console.error(`[fetchMetadata] Error reading/parsing localStorage for ${debateId}:`, error);
-      }
-
-      // Prevent concurrent fetches by checking loading state *within the specific item*
-      // This allows multiple different items to load concurrently
-      const currentItem = metadataCache[debateId] as DebateMetadata | undefined;
-      if (currentItem && typeof currentItem.isLoading === 'boolean' && currentItem.isLoading) {
-        console.log(`[fetchMetadata] Fetch already in progress for metadata ${debateId}, skipping.`);
-        return;
-      }
-
-      // 3. Fetch from API
-      console.log(`[fetchMetadata] Cache MISS. Fetching METADATA for debate ${debateId} from API`);
-      // Set loading state for this specific item
-      setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId] || {}), isLoading: true, error: null } }));
-
-      try {
-          const response = await fetch(`/api/hansard/debates/${debateId}/metadata`);
-          if (!response.ok) {
-              let errorMsg = `Metadata fetch failed: ${response.status}`;
-              try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (_e) { }
-              throw new Error(errorMsg);
-          }
-          const metadata: DebateMetadata = await response.json();
-          console.log(`[fetchMetadata] Fetched data for ${debateId}, caching.`);
-
-          // Store in localStorage
-          try {
-            localStorage.setItem(localStorageKey, JSON.stringify(metadata));
-          } catch (error) {
-            console.error(`[fetchMetadata] Error writing to localStorage for ${debateId}:`, error);
-          }
-
-          // Update state cache with fetched data, clear loading/error
-          setMetadataCache(prev => ({ ...prev, [debateId]: { ...metadata, isLoading: false, error: null } }));
-
-      } catch (e: any) {
-          console.error(`[fetchMetadata] Failed fetch metadata ${debateId}:`, e);
-          // Update state cache with error
-          setMetadataCache(prev => ({ ...prev, [debateId]: { ...(prev[debateId] || {}), isLoading: false, error: e.message || 'Failed to load metadata' } }));
-      }
-  }, [metadataCache]);
+  }, [selectedDebateId, originalDebateCache]);
 
   // Fetch Summary Data
   const fetchSummary = useCallback(async (debateId: string | null) => {
@@ -297,7 +170,7 @@ export default function Home() {
       console.log(`[fetchSummary] Fetching summary for ${debateId}`);
       setIsLoadingSummary(true);
       setErrorSummary(null);
-      setSummaryText(null); // Clear previous summary
+      setSummaryText(null);
 
       try {
           const response = await fetch(`/api/hansard/debates/summarize/${debateId}`);
@@ -313,32 +186,27 @@ export default function Home() {
       } finally {
           setIsLoadingSummary(false);
       }
-  }, []); 
+  }, []);
 
   // Handle Logout
   const handleLogout = useCallback(() => {
     logout();
-    setIsOptionsMenuOpen(false); // Close menu after logout
+    setIsOptionsMenuOpen(false);
   }, [logout]);
 
-  // Handle Debate Selection (triggered by ChatList or DebateInitializer)
+  // Handle Debate Selection
   const handleDebateSelect = useCallback((debateId: string | null) => {
     console.log(`[handleDebateSelect] Selecting debate: ${debateId}`);
     if (!debateId) {
       setSelectedDebateId(null);
       setSelectedDebateSummary(null);
-      setOriginalDebate(null);
-      setSelectedDebateMetadata(null);
       setSummaryText(null);
       setIsSummaryOpen(false);
-      setIsOptionsMenuOpen(false); // Close options menu on new debate select
+      setIsOptionsMenuOpen(false);
       setSelectedOriginalIndex(null);
-      closeDebateSearch(); // Use the function from the hook
+      closeDebateSearch();
       router.push('/');
-
-      // --- Close mobile sidebar on deselect ---
       setIsMobileSidebarOpen(false);
-      // ---
       return;
     }
 
@@ -350,76 +218,44 @@ export default function Home() {
     setSelectedDebateId(debateId);
     setViewMode('rewritten');
     setSelectedOriginalIndex(null);
-    closeDebateSearch(); // Use the function from the hook
+    setOriginalPanelHeight(43);
+    closeDebateSearch();
     setSelectedDebateSummary(null);
-    setOriginalDebate(null);
     setSummaryText(null);
     setIsSummaryOpen(false);
-    setIsOptionsMenuOpen(false); // Close options menu on new debate select
-
-    // --- Close mobile sidebar on select ---
+    setIsOptionsMenuOpen(false);
     setIsMobileSidebarOpen(false);
-    // ---
 
     router.push(`/?debateId=${debateId}`);
-    fetchSelectedDebateMetadata(debateId);
-    fetchOriginalDebate(debateId);
-    fetchSummary(debateId); // Fetch the summary for the newly selected debate
+    
+    // Fetch data using cache hooks only if not already cached
+    const currentMetadataState = metadataCache.getCachedData(debateId);
+    const currentOriginalState = originalDebateCache.getCachedData(debateId);
+    
+    if (!currentMetadataState.data && !currentMetadataState.isLoading) {
+      metadataCache.fetchData(debateId, fetchMetadataFromAPI);
+    }
+    
+    if (!currentOriginalState.data && !currentOriginalState.isLoading) {
+      originalDebateCache.fetchData(debateId, fetchOriginalDebateFromAPI);
+    }
+    
+    fetchSummary(debateId);
 
-  }, [selectedDebateId, fetchSelectedDebateMetadata, fetchOriginalDebate, fetchSummary, router, closeDebateSearch]); // Added fetchSummary and closeDebateSearch dependency
+  }, [selectedDebateId, metadataCache, originalDebateCache, fetchMetadataFromAPI, fetchOriginalDebateFromAPI, fetchSummary, router, closeDebateSearch]);
 
-  // Specific handler for selection coming *from* the ChatList component
+  // Handle selection from ChatList
   const handleSelectDebateFromList = useCallback((debateSummary: InternalDebateSummary) => {
-    // --- NEW: Close sidebar if same debate is tapped on mobile ---
     if (debateSummary.id === selectedDebateId && isMobileSidebarOpen) {
       setIsMobileSidebarOpen(false);
       return;
     }
-    // ---
 
-    // Existing logic for selecting a *new* debate
     setSelectedDebateSummary(debateSummary);
     handleDebateSelect(debateSummary.id);
-  }, [handleDebateSelect, selectedDebateId, isMobileSidebarOpen]); // Added dependencies
+  }, [handleDebateSelect, selectedDebateId, isMobileSidebarOpen]);
 
-  // Effect to update selectedDebateMetadata state when the cache changes for the selected ID
-  useEffect(() => {
-    if (selectedDebateId && metadataCache[selectedDebateId]) {
-      const cachedMeta = metadataCache[selectedDebateId];
-      // Check if it has actual data (e.g., speakerCount) and isn't just loading/error
-      if (!cachedMeta.isLoading && !cachedMeta.error && typeof cachedMeta.speakerCount === 'number') {
-          setSelectedDebateMetadata(cachedMeta);
-          setIsLoadingMetadata(false);
-          setErrorMetadata(null);
-      } else {
-          setIsLoadingMetadata(!!cachedMeta.isLoading);
-          setErrorMetadata(cachedMeta.error || null);
-          if (cachedMeta.isLoading || cachedMeta.error) {
-              setSelectedDebateMetadata(null);
-          }
-      }
-    } else if (selectedDebateId) {
-        setIsLoadingMetadata(true);
-        setErrorMetadata(null);
-        setSelectedDebateMetadata(null);
-        if (!metadataCache[selectedDebateId]?.isLoading) {
-            fetchSelectedDebateMetadata(selectedDebateId);
-        }
-    } else {
-        setIsLoadingMetadata(false);
-        setErrorMetadata(null);
-        setSelectedDebateMetadata(null);
-    }
-  }, [selectedDebateId, metadataCache, fetchSelectedDebateMetadata]);
-
-  // Handle Stream Completion
-  // TODO: Add callback from ChatView to set isRegenerating = false
-  // const handleStreamComplete = useCallback(() => {
-  //   setIsRegenerating(false);
-  //   console.log("[handleStreamComplete] Stream finished or failed, regeneration state reset.");
-  // }, []);
-
-  // Calculate the selected original item based on state here
+  // Calculate the selected original item
   const selectedOriginalItem = (selectedOriginalIndex !== null && originalDebate?.Items)
       ? originalDebate.Items.find(item => item.OrderInSection === selectedOriginalIndex)
       : null;
@@ -430,8 +266,17 @@ export default function Home() {
   // Stable callback for ChatView to update the parent's ref with rewritten speeches
   const handleRewrittenDebateUpdate = useCallback((speeches: Speech[]) => {
     rewrittenDebateRef.current = speeches;
-    // The search useEffect already depends on rewrittenDebateRef, so no need to trigger search here.
-  }, []); // No dependencies needed, it only updates a ref
+  }, []);
+
+  // Memoize metadata transformation to prevent profile pictures from disappearing
+  const transformedMetadata = useMemo(() => {
+    return Object.fromEntries(
+      Object.entries(metadataCache.cache).map(([id, cacheState]) => [
+        id, 
+        cacheState.data ? { ...cacheState.data, isLoading: cacheState.isLoading, error: cacheState.error } : { isLoading: cacheState.isLoading, error: cacheState.error }
+      ])
+    );
+  }, [metadataCache.cache]);
 
   return (
     <main className="flex h-dvh w-screen bg-[#111b21] text-white overflow-hidden relative">
@@ -487,8 +332,8 @@ export default function Home() {
           <ChatList
             selectedDebateId={selectedDebateId}
             onSelectDebate={handleSelectDebateFromList}
-            allMetadata={metadataCache}
-            fetchMetadata={fetchSelectedDebateMetadata}
+            allMetadata={transformedMetadata}
+            fetchMetadata={(debateId: string) => metadataCache.fetchData(debateId, fetchMetadataFromAPI)}
           />
         </div>
       </div>
@@ -559,10 +404,10 @@ export default function Home() {
                      {/* DebateMetadataIcon */}
                      <DebateMetadataIcon
                        metadata={{ // Construct the object needed by the icon
-                         ...(selectedDebateMetadata || {}),
+                         ...(metadataState.data || {}),
                          // Still use separate loading/error state for the selected item's header
-                         isLoading: isLoadingMetadata,
-                         error: errorMetadata
+                         isLoading: metadataState.isLoading,
+                         error: metadataState.error
                        }}
                        size={40} // Standard avatar size
                      />
@@ -603,7 +448,6 @@ export default function Home() {
                          title="Casual View"
                        >
                          <CasualIcon />
-                         <span className="hidden sm:inline">Casual</span>
                        </button>
                        <button
                          onClick={() => setViewMode('original')}
@@ -613,10 +457,9 @@ export default function Home() {
                              : 'text-gray-400 hover:text-gray-200'
                          } disabled:opacity-50 disabled:cursor-not-allowed`}
                          title="Original View"
-                         disabled={!originalDebate || isLoadingOriginal || !!errorOriginal} // Disable if no original data or loading/error
+                         disabled={!originalDebate || originalDebateState.isLoading || !!originalDebateState.error} // Disable if no original data or loading/error
                        >
                          <OriginalIcon />
-                         <span className="hidden sm:inline">Original</span>
                        </button>
                      </div>
 
@@ -677,20 +520,21 @@ export default function Home() {
                            <div className="px-4 py-1 text-sm text-gray-300 truncate" title={user.email}>
                              {user.email}
                            </div>
+                          {/* Billing Link */}
+                          <Link
+                             href="/billing"
+                             onClick={() => setIsOptionsMenuOpen(false)}
+                             className="flex w-full text-left px-4 py-2 text-sm text-indigo-400 hover:bg-gray-700 hover:text-indigo-300"
+                           >
+                             {isProUser ? 'Manage Subscription' : 'Upgrade to Pro'}
+                           </Link>
                            <button
                              onClick={handleLogout}
                              className="w-full text-left px-4 py-2 text-sm text-indigo-400 hover:bg-gray-700 hover:text-indigo-300"
                            >
                              Logout
                            </button>
-                           {/* Billing Link */}
-                           <Link
-                             href="/billing"
-                             onClick={() => setIsOptionsMenuOpen(false)}
-                             className="w-full text-left px-4 py-2 text-sm text-indigo-400 hover:bg-gray-700 hover:text-indigo-300"
-                           >
-                             {isProUser ? 'Manage Subscription' : 'Upgrade to Pro'}
-                           </Link>
+
                          </>
                        )}
                      </div>
@@ -705,6 +549,7 @@ export default function Home() {
               isLoading={isLoadingSummary}
               error={errorSummary}
               text={summaryText}
+              title={selectedDebateSummary?.title || originalDebate?.Overview?.Title}
               onClose={() => setIsSummaryOpen(false)}
             />
 
@@ -716,13 +561,14 @@ export default function Home() {
                 debateId={selectedDebateId}
                 viewMode={viewMode}
                 originalDebateData={originalDebate}
-                isLoadingOriginal={isLoadingOriginal}
-                errorOriginal={errorOriginal}
-                fetchOriginalDebate={() => fetchOriginalDebate(selectedDebateId)} // Pass fetch function
+                isLoadingOriginal={originalDebateState.isLoading}
+                errorOriginal={originalDebateState.error}
+                                 fetchOriginalDebate={() => originalDebateCache.fetchData(selectedDebateId, fetchOriginalDebateFromAPI)} // Pass fetch function
                 selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
                 onBubbleClick={(index) => {
                   console.log(`[page.tsx] Bubble clicked, setting index: ${index}`);
                   setSelectedOriginalIndex(index ?? null); // Set to null if index is undefined
+                  // Don't auto-expand the panel, let user decide via the tab
                 }} // Pass handler down
                 searchQuery={currentSearchQuery} // Pass search query
                 highlightedIndex={highlightedIndex} // Pass highlighted item's index
@@ -732,18 +578,21 @@ export default function Home() {
               />
             </div>
 
-            {/* Resizable Panel (Positioned absolutely at the bottom) */}
-            {selectedOriginalIndex !== null && (
-                <OriginalDebateViewer
-                  viewMode={viewMode}
-                  selectedOriginalIndex={selectedOriginalIndex}
-                  selectedOriginalItem={selectedOriginalItem}
-                  isLoadingOriginal={isLoadingOriginal}
-                  errorOriginal={errorOriginal}
-                  originalPanelHeight={originalPanelHeight}
-                  setOriginalPanelHeight={setOriginalPanelHeight}
-                  onClose={() => setSelectedOriginalIndex(null)}
-                />
+            {/* Original Contribution - visible when an index is selected */}
+            {selectedOriginalIndex !== null && selectedOriginalItem && (
+              <OriginalContribution
+                key={`original-panel-${selectedOriginalIndex}`}
+                item={selectedOriginalItem}
+                selectedOriginalIndex={selectedOriginalIndex}
+                onClose={() => {
+                  setSelectedOriginalIndex(null);
+                  setOriginalPanelHeight(43);
+                }}
+                originalPanelHeight={originalPanelHeight}
+                setOriginalPanelHeight={setOriginalPanelHeight}
+                isLoadingOriginal={originalDebateState.isLoading}
+                errorOriginal={originalDebateState.error}
+              />
             )}
 
             {/* Footer */}

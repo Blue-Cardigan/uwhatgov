@@ -7,16 +7,17 @@ interface SummaryViewerProps {
   isLoading: boolean;
   error: string | null;
   text: string | null;
+  title?: string;
   onClose: () => void;
 }
 
-const SummaryViewer: React.FC<SummaryViewerProps> = ({ isOpen, isLoading, error, text, onClose }) => {
+const SummaryViewer: React.FC<SummaryViewerProps> = ({ isOpen, isLoading, error, text, title, onClose }) => {
   if (!isOpen) {
     return null;
   }
 
   return (
-    <div className="absolute top-16 left-0 right-0 z-30 bg-[#111b21] border-b border-gray-700 shadow-lg p-4 text-sm max-h-48 overflow-y-auto">
+    <div className="absolute top-16 left-0 right-0 z-30 bg-[#111b21] border-b border-gray-700 shadow-lg p-4 text-sm max-h-64 overflow-y-auto">
       {/* Close button for the dropdown */}
       <button
         onClick={onClose}
@@ -25,12 +26,21 @@ const SummaryViewer: React.FC<SummaryViewerProps> = ({ isOpen, isLoading, error,
       >
         ✕
       </button>
+      
+      {/* Debate Title */}
+      {title && (
+        <h3 className="text-lg font-semibold text-white mb-3 pr-6 leading-tight">
+          {title}
+        </h3>
+      )}
+      
+      {/* Summary Content */}
       {isLoading ? (
         <span className="italic text-gray-400 animate-pulse">Generating summary...</span>
       ) : error ? (
         <span className="text-red-400 italic">Error: {error}</span>
       ) : text ? (
-        <p className="text-gray-300 pr-4">{text}</p>
+        <p className="text-gray-300 pr-4 leading-relaxed">{text}</p>
       ) : (
         <span className="italic text-gray-500">No summary available or not generated yet.</span>
       )}

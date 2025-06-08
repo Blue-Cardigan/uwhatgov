@@ -9,6 +9,7 @@ import { parsePartyAbbreviation } from '@/lib/partyColors';
 import { TypingIndicator } from './TypingIndicator';
 import { escapeRegExp } from '@/utils/stringUtils';
 import { getBaseSpeakerName } from '@/utils/chatUtils';
+import { AuthForm } from '@/components/AuthForm';
 import type { Database } from '@/lib/database.types'; // Assuming database types are generated
 
 // Define types locally for the rewritten version
@@ -75,10 +76,11 @@ const ChatView = forwardRef(({
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [showGenerateButton, setShowGenerateButton] = useState(false);
-  const [isCheckingCompletion, setIsCheckingCompletion] = useState(false);
+  const [dailyGenerationsUsed, setDailyGenerationsUsed] = useState(0);
   const MAX_RETRIES = 5;
   const INITIAL_RETRY_DELAY_MS = 1000;
   const SPEECH_DISPLAY_DELAY_MS = 750;
+  const MAX_DAILY_GENERATIONS_UNAUTHENTICATED = 3;
 
   const [typingSpeakerInfo, setTypingSpeakerInfo] = useState<{ speaker: string, party: string | null } | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true); // State to track scroll position
@@ -108,69 +110,54 @@ const ChatView = forwardRef(({
   const itemRefs = useRef<Map<number, HTMLDivElement | null>>(new Map()); // Ref map for items
   const [speakerPartyMap, setSpeakerPartyMap] = useState<Map<string, string | null>>(new Map()); // Map base speaker name -> party abbreviation (or null)
   const currentlyFetchingParties = useRef<Set<number>>(new Set()); // Track ongoing party fetches
-  const completionCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Track completion check interval
 
   // Refs for delayed display queue
   const pendingSpeechesQueueRef = useRef<Speech[]>([]);
   const isProcessingQueueRef = useRef<boolean>(false);
   const speechDisplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Function to check if background generation has completed
-  const checkBackgroundCompletion = useCallback(async () => {
-    if (!debateId || isCheckingCompletion) return;
-    
-    setIsCheckingCompletion(true);
-    try {
-      const { data: supabaseDataArray, error: supabaseError } = await supabase
-        .from('casual_debates_uwhatgov')
-        .select('content, status')
-        .eq('id', debateId)
-        .limit(1);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-      if (!supabaseError && supabaseDataArray?.[0]?.status === 'success' && supabaseDataArray[0].content) {
-        console.log(`[${debateId}] Background generation completed! Loading content...`);
-        
-        // Clear the completion check interval
-        if (completionCheckIntervalRef.current) {
-          clearInterval(completionCheckIntervalRef.current);
-          completionCheckIntervalRef.current = null;
-        }
-        
-        // Parse and load the completed content
-        try {
-          const parsedContent = JSON.parse(supabaseDataArray[0].content);
-          const typedSpeeches = (parsedContent.speeches || []).map((s: any) => ({
-              speaker: s.speaker || '?',
-              text: s.text || '',
-              originalIndex: typeof s.originalIndex === 'number' ? s.originalIndex : undefined,
-              originalSnippet: typeof s.originalSnippet === 'string' ? s.originalSnippet : undefined,
-          }));
-          
-          setRewrittenDebate({ ...parsedContent, speeches: typedSpeeches });
-          speechesRef.current = typedSpeeches;
-          onRewrittenDebateUpdate(speechesRef.current);
-          setIsLoadingRewritten(false);
-          setShowGenerateButton(false);
-          setIsStreaming(false);
-        } catch (parseError) {
-          console.error(`[${debateId}] Error parsing background completion:`, parseError);
-        }
-      } else if (!supabaseError && supabaseDataArray?.[0]?.status === 'failed') {
-        console.log(`[${debateId}] Background generation failed. Stopping checks.`);
-        // Clear the completion check interval
-        if (completionCheckIntervalRef.current) {
-          clearInterval(completionCheckIntervalRef.current);
-          completionCheckIntervalRef.current = null;
-        }
-        setIsStreaming(false);
-        setShowGenerateButton(true); // Allow retry
-      }
+  // Functions to manage daily generation limits for unauthenticated users
+  const getDailyGenerationKey = () => {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    return `uwhatgov_daily_generations_${today}`;
+  };
+
+  const loadDailyGenerationCount = useCallback(() => {
+    try {
+      const key = getDailyGenerationKey();
+      const stored = localStorage.getItem(key);
+      const count = stored ? parseInt(stored, 10) : 0;
+      setDailyGenerationsUsed(isNaN(count) ? 0 : count);
     } catch (error) {
-      console.error(`[${debateId}] Error checking background completion:`, error);
-    } finally {
-      setIsCheckingCompletion(false);
+      console.warn('Error loading daily generation count:', error);
+      setDailyGenerationsUsed(0);
     }
-  }, [debateId, isCheckingCompletion, supabase, onRewrittenDebateUpdate]);
+  }, []);
+
+  const incrementDailyGenerationCount = useCallback(() => {
+    try {
+      const key = getDailyGenerationKey();
+      const newCount = dailyGenerationsUsed + 1;
+      localStorage.setItem(key, newCount.toString());
+      setDailyGenerationsUsed(newCount);
+    } catch (error) {
+      console.warn('Error saving daily generation count:', error);
+    }
+  }, [dailyGenerationsUsed]);
+
+  const canGenerateToday = useCallback(() => {
+    if (currentUserId) return true; // Authenticated users have no limit
+    return dailyGenerationsUsed < MAX_DAILY_GENERATIONS_UNAUTHENTICATED;
+  }, [currentUserId, dailyGenerationsUsed]);
+
+  // Load daily generation count on mount and when auth state changes
+  useEffect(() => {
+    if (!authLoading) {
+      loadDailyGenerationCount();
+    }
+  }, [authLoading, loadDailyGenerationCount]);
 
   // startGeneration and useImperativeHandle will be defined after connectEventSource
 
@@ -612,15 +599,15 @@ const ChatView = forwardRef(({
       }
   }, [processPendingSpeeches]);
 
-  const connectEventSource = useCallback((attempt: number) => {
+  const connectEventSource = useCallback((attempt: number, subscribe: boolean = false) => {
     if (!debateId) return;
     eventSourceRef.current?.close();
     if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;
     }
-    const streamUrl = `/api/hansard/debates/rewrite/stream/${debateId}`;
-    console.log(`[Attempt ${attempt + 1}] Connecting SSE: ${streamUrl}`);
+    const streamUrl = `/api/hansard/debates/rewrite/stream/${debateId}${subscribe ? '?subscribe=true' : ''}`;
+    console.log(`[Attempt ${attempt + 1}] Connecting SSE: ${streamUrl}${subscribe ? ' (subscription)' : ' (generation)'}`);
     const es = new EventSource(streamUrl);
     eventSourceRef.current = es;
     es.onopen = () => {
@@ -640,7 +627,7 @@ const ChatView = forwardRef(({
         setIsReconnecting(true);
         console.log(`[SSE ${debateId}] Reconnecting ${attempt + 2} after ${retryDelay}ms...`);
         retryTimeoutRef.current = setTimeout(() => {
-            connectEventSource(attempt + 1);
+            connectEventSource(attempt + 1, subscribe);
         }, retryDelay);
       } else {
         console.error(`[SSE ${debateId}] Max retries reached.`);
@@ -693,13 +680,57 @@ const ChatView = forwardRef(({
     };
   }, [debateId, MAX_RETRIES, INITIAL_RETRY_DELAY_MS, processJsonBuffer]);
 
-  // Function to start generation
-  const startGeneration = useCallback(() => {
-    if (!debateIdRef.current || !currentUserId) {
-        console.warn('[ChatView startGeneration] No debate ID or user not authenticated.');
+  // Function to check if stream is ongoing
+  const checkForOngoingStream = useCallback(async () => {
+    if (!debateIdRef.current) return false;
+    
+    try {
+      // Try to subscribe to an ongoing stream
+      const response = await fetch(`/api/hansard/debates/rewrite/stream/${debateIdRef.current}?subscribe=true`);
+      if (response.ok) {
+        // Check if this is actually an ongoing stream or just a completed debate
+        // We can do this by checking if we immediately get a 'complete' event
+        const reader = response.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          const { value } = await reader.read();
+          reader.releaseLock();
+          
+          if (value) {
+            const chunk = decoder.decode(value);
+            // If we immediately get a complete event, this debate is already finished
+            if (chunk.includes('"type":"complete"')) {
+              console.log(`[ChatView] Debate ${debateIdRef.current} is already completed, not subscribing`);
+              return false;
+            }
+          }
+        }
+        console.log(`[ChatView] Found ongoing stream for ${debateIdRef.current}, subscribing`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.log(`[ChatView] No ongoing stream for ${debateIdRef.current}`);
+      return false;
+    }
+  }, []);
+
+  // Function to start generation or subscribe to existing
+  const startGeneration = useCallback(async () => {
+    if (!debateIdRef.current) {
+        console.warn('[ChatView startGeneration] No debate ID.');
         return;
     }
-    console.log(`[ChatView startGeneration] Starting generation for ${debateIdRef.current}`);
+
+    // Check if there's already an ongoing stream first
+    const hasOngoingStream = await checkForOngoingStream();
+    
+    console.log(`[ChatView startGeneration] ${hasOngoingStream ? 'Subscribing to existing' : 'Starting new'} generation for ${debateIdRef.current}`);
+    
+    // Increment daily generation count for unauthenticated users (only for new generations, not subscriptions)
+    if (!currentUserId && !hasOngoingStream) {
+        incrementDailyGenerationCount();
+    }
     
     // Reset relevant state before starting new stream
     eventSourceRef.current?.close(); // Close existing connection if any
@@ -719,9 +750,9 @@ const ChatView = forwardRef(({
     setIsLoadingRewritten(false); // Not technically loading from cache anymore
     setIsStreaming(true);
 
-    // Connect the event source
-    connectEventSource(0);
-  }, [currentUserId, connectEventSource]);
+    // Connect the event source (either as subscription or generation)
+    connectEventSource(0, hasOngoingStream);
+  }, [currentUserId, connectEventSource, checkForOngoingStream, canGenerateToday, incrementDailyGenerationCount]);
 
   // Expose scrollToItem method to parent via ref
   useImperativeHandle(ref, () => ({
@@ -814,44 +845,54 @@ const ChatView = forwardRef(({
              console.error("Failed parse Supabase content:", parseError);
              setIsLoadingRewritten(false);
           }
-        } else if (supabaseData?.status === 'processing') {
-          // Debate is currently being generated in the background
-          console.log(`${debateId} is being generated in background. Starting completion checks...`);
-          setIsLoadingRewritten(false);
-          setIsStreaming(true); // Show as streaming even though we're not connected
-          setShowGenerateButton(false);
-          setRewrittenDebate(currentDebateData); // Show title while waiting
-          speechesRef.current = [];
-          onRewrittenDebateUpdate([]);
-          
-          // Start checking for completion every 5 seconds
-          if (completionCheckIntervalRef.current) {
-            clearInterval(completionCheckIntervalRef.current);
-          }
-          completionCheckIntervalRef.current = setInterval(checkBackgroundCompletion, 5000);
-          
         } else {
           // No cached version found or status is not 'success'
           console.log(`${debateId} not cached/complete.`);
-          // *** Check authentication *before* attempting to stream ***
-          if (currentUserId) {
-            console.log(`User ${currentUserId} is logged in, showing generate button...`);
-            setIsLoadingRewritten(false); // Not loading cache anymore
-            setIsStreaming(false); // Don't auto-start streaming
-            setShowGenerateButton(true); // Show generate button instead
-            setRewrittenDebate(currentDebateData); // Show title while waiting
-            speechesRef.current = [];
-            onRewrittenDebateUpdate([]); // Notify parent of empty initial state
-            // Don't auto-connect, wait for button click
-          } else {
-            // User is not logged in, block streaming
-            console.log(`User is not logged in. Blocking stream generation for ${debateId}.`);
-            setIsLoadingRewritten(false);
-            setIsStreaming(false);
-            setShowGenerateButton(false);
-            setRewrittenDebate(null); // Ensure no placeholder/loading title is shown
-            // No need to call onRewrittenDebateUpdate as state is effectively empty
-          }
+          // *** Check if user can generate (authenticated or within daily limit) ***
+          if (currentUserId || canGenerateToday()) {
+            // First check if there's an ongoing stream before showing generate button
+            console.log(`User ${currentUserId ? 'authenticated' : 'unauthenticated with remaining generations'}, checking for ongoing stream...`);
+            try {
+              const hasOngoingStream = await checkForOngoingStream();
+              if (hasOngoingStream) {
+                console.log(`Found ongoing stream for ${debateId}, subscribing automatically`);
+                // Set up for streaming
+                setIsLoadingRewritten(false);
+                setIsStreaming(true);
+                setShowGenerateButton(false);
+                setRewrittenDebate(currentDebateData); // Show title while streaming
+                speechesRef.current = [];
+                onRewrittenDebateUpdate([]); // Notify parent of empty initial state
+                // Connect to the ongoing stream
+                connectEventSource(0, true); // true = subscribe mode
+              } else {
+                console.log(`No ongoing stream found for ${debateId}, showing generate button`);
+                setIsLoadingRewritten(false); // Not loading cache anymore
+                setIsStreaming(false); // Don't auto-start streaming
+                setShowGenerateButton(true); // Show generate button instead
+                setRewrittenDebate(currentDebateData); // Show title while waiting
+                speechesRef.current = [];
+                onRewrittenDebateUpdate([]); // Notify parent of empty initial state
+              }
+            } catch (error) {
+              console.error(`Error checking for ongoing stream for ${debateId}:`, error);
+              // Fall back to showing generate button on error
+              setIsLoadingRewritten(false);
+              setIsStreaming(false);
+              setShowGenerateButton(true);
+              setRewrittenDebate(currentDebateData);
+              speechesRef.current = [];
+              onRewrittenDebateUpdate([]);
+            }
+                     } else {
+             // User is not logged in and has reached daily limit
+             console.log(`User is not logged in and has reached daily limit. Blocking stream generation for ${debateId}.`);
+             setIsLoadingRewritten(false);
+             setIsStreaming(false);
+             setShowGenerateButton(false);
+             setRewrittenDebate(null); // Ensure no placeholder/loading title is shown
+             // No need to call onRewrittenDebateUpdate as state is effectively empty
+           }
         }
       } catch (e: any) {
         console.error(`Setup error ${debateId}:`, e);
@@ -867,11 +908,6 @@ const ChatView = forwardRef(({
           clearTimeout(retryTimeoutRef.current);
           console.log(`Cleared retry timeout for ${debateId} on cleanup`);
       }
-      if (completionCheckIntervalRef.current) {
-          clearInterval(completionCheckIntervalRef.current);
-          completionCheckIntervalRef.current = null;
-          console.log(`Cleared completion check interval for ${debateId} on cleanup`);
-      }
       const esToClose = eventSourceRef.current; // Capture ref before clearing
       eventSourceRef.current = null; // Clear ref
       if (esToClose) {
@@ -880,7 +916,7 @@ const ChatView = forwardRef(({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debateId, onRewrittenDebateUpdate, authLoading, currentUserId, supabase]); // Removed connectEventSource
+  }, [debateId, onRewrittenDebateUpdate, authLoading, currentUserId, supabase]);
 
   const handleBubbleClickInternal = useCallback((index: number | undefined) => {
       console.log(`[ChatView] Bubble click index: ${index}. Calling parent.`);
@@ -1100,23 +1136,30 @@ const ChatView = forwardRef(({
       }
 
     if (viewMode === 'rewritten') {
-      console.log(`[${debateId}] Render state:`, {
-        authLoading,
-        currentUserId: !!currentUserId,
-        isLoadingRewritten,
-        showGenerateButton,
-        hasRewrittenDebate: !!rewrittenDebate,
-        speechCount: rewrittenDebate?.speeches?.length || 0
-      });
-      // NEW: Check for logged-out state first, *only if* not loading and no debate loaded (cache miss)
-      if (!authLoading && !currentUserId && !isLoadingRewritten && !rewrittenDebate && debateId) {
-        return <div className="p-4 text-center text-yellow-300">You're the first! Log in to generate the Casual Version for this debate.</div>;
+      // Check for unauthenticated users who have reached their daily limit
+      if (!authLoading && !currentUserId && !isLoadingRewritten && !rewrittenDebate && debateId && !canGenerateToday()) {
+        return (
+          <div className="p-4 text-center">
+            <div className="text-yellow-300 mb-2">Daily limit reached!</div>
+            <div className="text-gray-400 text-sm mb-3">
+              You've used all {MAX_DAILY_GENERATIONS_UNAUTHENTICATED} of your daily debate generations.
+            </div>
+            <div className="text-gray-500 text-xs">
+              <button
+                onClick={() => setIsAuthModalOpen(true)}
+                className="text-gray-400 cursor-pointer hover:underline"
+              >
+                Sign in for unlimited.
+              </button>
+            </div>
+          </div>
+        );
       }
 
-      if (isLoadingRewritten) return <div className="p-4 text-center text-gray-400">Loading Casual Version...</div>;
+      if (isLoadingRewritten) return <div className="p-4 text-center text-gray-400">Loading Chat...</div>;
       
-      // Show generate button for authenticated users when no cached data
-      if (showGenerateButton && currentUserId) {
+      // Show generate button when no cached data (for both authenticated and unauthenticated users who haven't reached limit)
+      if (showGenerateButton && (currentUserId || canGenerateToday())) {
         return (
           <div className="p-4 text-center">
             <button
@@ -1128,7 +1171,17 @@ const ChatView = forwardRef(({
               </svg>
               Generate Casual Version
             </button>
-            <p className="text-sm text-gray-500 mt-2">Click to create a casual chat version of this debate</p>
+            {!currentUserId && (
+              <p className="text-xs text-gray-400 mt-1">
+                {MAX_DAILY_GENERATIONS_UNAUTHENTICATED - dailyGenerationsUsed} of {MAX_DAILY_GENERATIONS_UNAUTHENTICATED} remaining.{' '}
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="text-gray-400 cursor-pointer hover:underline"
+                >
+                  Sign in for unlimited
+                </button>
+              </p>
+            )}
           </div>
         );
       }
@@ -1251,7 +1304,25 @@ const ChatView = forwardRef(({
   };
 
   return (
-    <div className="flex flex-col h-full relative bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200 bg-[url('/edited-pattern.svg')] bg-repeat bg-[length:70px_70px]">
+    <>
+      {/* Auth Modal Overlay - Conditionally Rendered */}
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="relative bg-white p-4 rounded-lg shadow-xl max-w-md w-full">
+            {/* Close Button for Modal */}
+            <button 
+              onClick={() => setIsAuthModalOpen(false)} 
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-800 p-1 rounded-full bg-gray-200 hover:bg-gray-300 text-lg font-bold"
+              aria-label="Close authentication form"
+            >
+              &times;
+            </button>
+            <AuthForm onSuccess={() => setIsAuthModalOpen(false)} />
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col h-full relative bg-gradient-to-b from-[#111b21] via-[#0c1317] to-[#111b21] text-gray-200 bg-[url('/edited-pattern.svg')] bg-repeat bg-[length:70px_70px]">
       {/* Scrollable chat content area */}
       <div ref={scrollContainerRef} className="flex-grow overflow-y-auto p-4 space-y-4">
         {renderContent()}
@@ -1280,6 +1351,7 @@ const ChatView = forwardRef(({
         </button>
       )}
     </div>
+    </>
   );
 });
 

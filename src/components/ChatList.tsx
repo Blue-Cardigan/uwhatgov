@@ -159,13 +159,13 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
         setError(null);
         // Fetch debates for the last known sitting date with current filters
         fetchDebates(lastSittingDate, true);
-    } else if (!lastSittingDate && !isLoading && debates.length === 0) {
-        // Handle case where last sitting date couldn't be fetched
+    } else if (!lastSittingDate && debates.length === 0) {
+        // Handle case where last sitting date couldn't be fetched - only check this when no debates loaded
         console.log("[ChatList] No last sitting date found, stopping initial load.");
         setIsLoading(false);
     }
     // This effect now handles both the very first load and subsequent loads triggered by filter changes (when not in search mode)
-  }, [lastSittingDate, houseFilter, fetchDebates, isSearchActive, debates.length, isLoading]); // Add houseFilter, debates.length, isLoading
+  }, [lastSittingDate, houseFilter, fetchDebates, isSearchActive]); // Removed debates.length, isLoading
 
 
   // --- Search Functionality (Uses searchTerm and ALL filters) ---
@@ -273,11 +273,14 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
   // --- Pagination --- Load previous day respecting current house filter
   const handleLoadPreviousDay = useCallback(() => {
     // Prevent loading if already loading, no older date known, or search is active
-    if (isLoading || !oldestDateLoaded || isSearchActive) return;
+    if (isLoading || !oldestDateLoaded || isSearchActive) {
+      console.log(`[ChatList] Skipping load previous day - isLoading: ${isLoading}, oldestDateLoaded: ${oldestDateLoaded}, isSearchActive: ${isSearchActive}`);
+      return;
+    }
 
     const previousDay = getPreviousDay(oldestDateLoaded);
     if (previousDay) {
-        console.log(`[ChatList] Infinite scroll triggered, loading previous day: ${previousDay}, house: ${houseFilter || 'all'}`);
+        console.log(`[ChatList] Infinite scroll triggered, loading previous day: ${previousDay}, house: ${houseFilter || 'all'} (current oldest: ${oldestDateLoaded})`);
         // fetchDebates will use the houseFilter from state
         fetchDebates(previousDay);
     } else {
@@ -325,7 +328,14 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
                   if (entry.isIntersecting) {
                       currentObservedItemsRef.set(id, entry);
                       // Fetch metadata only if not already loaded/loading/error
-                      if (!allMetadata[id] || (!allMetadata[id].isLoading && !allMetadata[id].error && !allMetadata[id].speakerCount)) {
+                      // Check if we have meaningful metadata (not just loading/error state)
+                      const metadata = allMetadata[id];
+                      const hasValidMetadata = metadata?.speakerCount !== undefined || metadata?.contributionCount !== undefined;
+                      const isCurrentlyLoading = metadata?.isLoading;
+                      const hasError = metadata?.error;
+                      
+                      // Only fetch if we don't have valid metadata and aren't currently loading
+                      if (!hasValidMetadata && !isCurrentlyLoading && !hasError) {
                          // console.log(`[ChatList Metadata IO] Item ${id} visible, fetching metadata.`);
                           fetchMetadata(id); // Prop function called here
                       }
@@ -350,9 +360,9 @@ export default function ChatList({ onSelectDebate, selectedDebateId, allMetadata
           currentObservedItemsRef.clear();
           observerRef.current = null;
       };
-  // Debounce might be complex here. Let's rely on IntersectionObserver's efficiency first.
-  // Re-run when the list of debates changes or the fetchMetadata function itself changes.
-  }, [debates, fetchMetadata, allMetadata]); // allMetadata dependency ensures we re-evaluate if metadata loaded elsewhere
+  // Remove allMetadata from dependencies to prevent complete re-creation of observer when cache resets
+  // The observer logic itself handles checking current metadata state
+  }, [debates, fetchMetadata]);
 
   // Ref setting function (simplified, observer re-observes in useEffect)
   const setItemRef = (debateId: string, element: HTMLDivElement | null) => {

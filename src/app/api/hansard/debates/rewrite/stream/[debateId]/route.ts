@@ -28,6 +28,91 @@ interface Speech {
   originalSnippet?: string;
 }
 
+// Global map to track ongoing streams
+const ongoingStreams = new Map<string, {
+    isGenerating: boolean;
+    subscribers: Set<ReadableStreamDefaultController<string>>;
+    lastActivity: number;
+}>();
+
+// Cleanup stale streams every 10 minutes
+setInterval(() => {
+    const now = Date.now();
+    const staleThreshold = 10 * 60 * 1000; // 10 minutes
+    
+    for (const [debateId, stream] of ongoingStreams.entries()) {
+        if (now - stream.lastActivity > staleThreshold) {
+            console.log(`[Stream Cleanup] Removing stale stream for debate ${debateId}`);
+            ongoingStreams.delete(debateId);
+        }
+    }
+}, 5 * 60 * 1000); // Check every 5 minutes
+
+// Handle subscription to ongoing stream
+async function handleSubscription(debateId: string, supabase: any) {
+    const streamInfo = ongoingStreams.get(debateId);
+    
+    if (!streamInfo || !streamInfo.isGenerating) {
+        // No ongoing stream, check if debate is cached
+        const { data: supabaseDataArray } = await supabase
+            .from('casual_debates_uwhatgov')
+            .select('status')
+            .eq('id', debateId)
+            .limit(1);
+            
+        const supabaseData = supabaseDataArray?.[0];
+        if (supabaseData?.status === 'success') {
+            // Already completed, send immediate complete
+            const readable = new ReadableStream({
+                start(controller) {
+                    const completeEvent = { type: 'complete' };
+                    controller.enqueue(`data: ${JSON.stringify(completeEvent)}\n\n`);
+                    controller.close();
+                }
+            });
+            return new Response(readable, {
+                headers: {
+                    'Content-Type': 'text/event-stream',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                },
+            });
+        } else {
+            // No ongoing stream and not cached
+            return NextResponse.json({ error: 'No ongoing generation for this debate' }, { status: 404 });
+        }
+    }
+
+    // Subscribe to ongoing stream
+    let subscriberController: ReadableStreamDefaultController<string> | null = null;
+    const readable = new ReadableStream({
+        start(controller) {
+            subscriberController = controller;
+            console.log(`[API Stream /${debateId}] New subscriber joined ongoing stream`);
+            streamInfo.subscribers.add(controller);
+            streamInfo.lastActivity = Date.now();
+            
+            // Send initial ping to confirm connection
+            const pingEvent = { type: 'ping' };
+            controller.enqueue(`data: ${JSON.stringify(pingEvent)}\n\n`);
+        },
+        cancel() {
+            console.log(`[API Stream /${debateId}] Subscriber disconnected`);
+            if (streamInfo && subscriberController) {
+                streamInfo.subscribers.delete(subscriberController);
+            }
+        }
+    });
+
+    return new Response(readable, {
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        },
+    });
+}
+
 export async function GET(
     request: NextRequest,
     context: any // Use 'any' as in the metadata route
@@ -35,26 +120,36 @@ export async function GET(
     // Create the server client inside the handler
     const supabase = createClient();
     
-    // Check auth using the server client
-    const { data: { user } } = await supabase.auth.getUser();
-
     // Access params *after* await
-    const { params } = context; // Destructure params from context
-    const awaitedParams = await params;
-    const debateId = awaitedParams.debateId;
+    const params = await context.params; // Await params first
+    const debateId = params.debateId;
 
-    if (!user) {
-        // Use debateId *after* checking for user, otherwise it might be undefined if accessed before await
-        console.log(`[API Stream /${debateId ?? 'unknown'}] Unauthorized access attempt.`);
-        return NextResponse.json({ type: 'error', payload: 'Unauthorized' }, { status: 401 });
+    // Parse URL to check if this is a subscription request
+    const url = new URL(request.url);
+    const subscribe = url.searchParams.get('subscribe') === 'true';
+
+    // If this is a subscription request, allow without auth
+    if (subscribe) {
+        console.log(`[API Stream /${debateId}] Subscription request (no auth required).`);
+        return handleSubscription(debateId, supabase);
     }
-    console.log(`[API Stream /${debateId}] Authorized request for user ${user.id}.`);
+
+    // For generation requests, allow both authenticated and unauthenticated users
+    const { data: { user } } = await supabase.auth.getUser();
+    console.log(`[API Stream /${debateId}] Generation request from ${user ? `user ${user.id}` : 'unauthenticated user'}.`);
 
     if (!debateId) {
         return NextResponse.json({ error: 'Missing debateId parameter' }, { status: 400 });
     }
 
-    console.log(`[API Route /stream/${debateId}] Received request.`);
+    // Check if there's already an ongoing stream for this debate
+    const existingStream = ongoingStreams.get(debateId);
+    if (existingStream && existingStream.isGenerating) {
+        console.log(`[API Route /stream/${debateId}] Stream already in progress, redirecting to subscription.`);
+        return handleSubscription(debateId, supabase);
+    }
+
+    console.log(`[API Route /stream/${debateId}] Starting new generation.`);
 
     let originalDebateResponse;
     try {
@@ -159,16 +254,12 @@ Text: ${item.text}
         // Update status to 'processing' before starting stream
         const { error: statusUpdateError } = await supabase
             .from('casual_debates_uwhatgov')
-            .upsert({ 
-                id: debateId, 
-                status: 'processing', 
-                last_updated_at: new Date().toISOString(),
-                error_message: null
-            }, { onConflict: 'id' });
-         if (statusUpdateError) {
-             console.warn(`[API Route /stream/${debateId}] Failed to update status to processing:`, statusUpdateError.message);
-         } else {
-             console.log(`[API Route /stream/${debateId}] Updated status to processing.`);
+            .update({ status: 'success', last_updated_at: new Date().toISOString() })
+            .eq('id', debateId);
+         if (statusUpdateError && statusUpdateError.code !== 'PGRST116') { // Ignore error if row doesn't exist yet
+             console.warn(`[API Route /stream/${debateId}] Failed to update status to success (might be new debate):`, statusUpdateError.message);
+         } else if (!statusUpdateError) {
+             console.log(`[API Route /stream/${debateId}] Updated status to success.`);
          }
 
         geminiStreamResult = await generateDebateStream(combinedText, debateTitle, startIndex);
@@ -181,6 +272,14 @@ Text: ${item.text}
         return NextResponse.json({ error: `Failed to start rewrite stream: ${error.message}` }, { status: 500 });
     }
 
+    // Initialize stream tracking
+    const streamInfo = {
+        isGenerating: true,
+        subscribers: new Set<ReadableStreamDefaultController<string>>(),
+        lastActivity: Date.now()
+    };
+    ongoingStreams.set(debateId, streamInfo);
+
     // --- Transform Gemini stream to SSE ---
     let pingIntervalId: NodeJS.Timeout | null = null;
     let buffer = ''; // Buffer to hold incomplete JSON strings
@@ -190,8 +289,28 @@ Text: ${item.text}
     let lastSpeaker: string | null = null;
     let bufferedNarrativePayload: Speech | null = null;
 
+    // Helper function to broadcast to all subscribers
+    const broadcastToSubscribers = (data: string) => {
+        streamInfo.lastActivity = Date.now();
+        const deadControllers = new Set<ReadableStreamDefaultController<string>>();
+        
+        for (const controller of streamInfo.subscribers) {
+            try {
+                controller.enqueue(data);
+            } catch (error) {
+                console.log(`[API Route /stream/${debateId}] Removing dead subscriber controller`);
+                deadControllers.add(controller);
+            }
+        }
+        
+        // Clean up dead controllers
+        for (const deadController of deadControllers) {
+            streamInfo.subscribers.delete(deadController);
+        }
+    };
+
     // Define helper function in a scope accessible by both transform and flush
-    const sendBufferedNarrative = (controller: TransformStreamDefaultController<string>) => {
+    const sendBufferedNarrative = () => {
         if (bufferedNarrativePayload) {
             console.log(`[API Route /stream/${debateId}] Sending/Flushing combined narrative message (Index: ${bufferedNarrativePayload.originalIndex}).`);
             bufferedNarrativePayload.text = bufferedNarrativePayload.text.trim();
@@ -199,7 +318,7 @@ Text: ${item.text}
                 const eventPayloadString = JSON.stringify(bufferedNarrativePayload);
                 const streamEvent: StreamEvent = { type: 'chunk', payload: eventPayloadString };
                 const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\n');
-                controller.enqueue(`data: ${formattedData}\n\n`);
+                broadcastToSubscribers(`data: ${formattedData}\n\n`);
             } else {
                  console.warn(`[API Route /stream/${debateId}] Skipping empty combined narrative message.`);
             }
@@ -230,18 +349,18 @@ Text: ${item.text}
                      if (lastSpeaker === 'Speaker' && bufferedNarrativePayload) {
                          bufferedNarrativePayload.text += ` ${speech.text.trim()}`; // Combine text
                      } else {
-                         sendBufferedNarrative(controller); // Send previous narrative if any
+                         sendBufferedNarrative(); // Send previous narrative if any
                          bufferedNarrativePayload = { ...speech }; // Buffer the new one (text is already trimmed in pipeGeneratorToStream)
                      }
                      lastSpeaker = 'Speaker';
                  } else {
                      // Regular speaker
-                     sendBufferedNarrative(controller); // Send any pending narrative first
+                     sendBufferedNarrative(); // Send any pending narrative first
                      console.log(`[API Route /stream/${debateId} Transform] Sending chunk for speaker: ${speech.speaker} (Index: ${speech.originalIndex}).`);
                      const speechJsonString = JSON.stringify(speech);
                      const streamEvent: StreamEvent = { type: 'chunk', payload: speechJsonString };
                      const formattedData = JSON.stringify(streamEvent).replace(/\n/g, '\n');
-                     controller.enqueue(`data: ${formattedData}\n\n`);
+                     broadcastToSubscribers(`data: ${formattedData}\n\n`);
                      lastSpeaker = speech.speaker;
                      // hasSentValidSpeech is managed solely in pipeGeneratorToStream now
                  }
@@ -256,7 +375,7 @@ Text: ${item.text}
         // Flush is called when the writable side is closed
         flush(controller) {
             // Send any remaining buffered narrative message before finishing
-            sendBufferedNarrative(controller); // Use the shared helper
+            sendBufferedNarrative(); // Use the shared helper
 
             if (pingIntervalId) {
                 clearInterval(pingIntervalId);
@@ -274,19 +393,32 @@ Text: ${item.text}
              lastSpeaker = null; // Reset speaker tracking
              bufferedNarrativePayload = null; // Ensure buffer is clear
 
-            // Finally, send the complete event
+            // Finally, send the complete event to all subscribers
             if (hasSentValidSpeech) {
                  const completeEvent: StreamEvent = { type: 'complete' };
                  const formattedCompleteData = JSON.stringify(completeEvent).replace(/\n/g, '\n');
-                 controller.enqueue(`data: ${formattedCompleteData}\n\n`);
+                 broadcastToSubscribers(`data: ${formattedCompleteData}\n\n`);
                  console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with completion event.`);
             } else {
                  console.warn(`[API Route /stream/${debateId}] No valid speeches found/generated. Sending error instead of complete.`);
                  const errorEvent: StreamEvent = { type: 'error', payload: { message: 'No valid content generated or found.' } }; // Slightly more general message
                  const formattedErrorData = JSON.stringify(errorEvent).replace(/\n/g, '\n');
-                 controller.enqueue(`data: ${formattedErrorData}\n\n`);
+                 broadcastToSubscribers(`data: ${formattedErrorData}\n\n`);
                  console.log(`[API Route /stream/${debateId}] SSE Transformer flushed with error (no valid content).`);
             }
+            
+            // Mark stream as complete and clean up
+            streamInfo.isGenerating = false;
+            // Close all subscriber controllers
+            for (const subscriberController of streamInfo.subscribers) {
+                try {
+                    subscriberController.close();
+                } catch (error) {
+                    // Ignore errors when closing
+                }
+            }
+            streamInfo.subscribers.clear();
+            ongoingStreams.delete(debateId);
         }
     });
 
@@ -295,7 +427,6 @@ Text: ${item.text}
         const writer = transformStream.writable.getWriter();
         const accumulatedSpeeches: Speech[] = []; // Accumulate speeches here
         let streamError: Error | null = null;
-        let clientDisconnected = false; // Track if client disconnected
 
         // Buffer for raw text from Gemini stream
         let geminiBuffer = '';
@@ -355,18 +486,12 @@ Text: ${item.text}
                                      accumulatedSpeeches.push(parsedSpeech); // Add regular speech
                                  }
                                  hasSentValidSpeech = true; // Mark that we have valid data
-                                 
-                                 // Try to write to client, but don't fail if client disconnected
+                                 // Write the *validated object* to the TransformStream writer
                                  try {
                                      await writer.write(parsedSpeech);
                                  } catch (writeError: any) {
-                                     if (writeError.message?.includes('closed') || writeError.code === 'ERR_INVALID_STATE') {
-                                         console.log(`[API Route /stream/${debateId}] Client disconnected, continuing generation in background...`);
-                                         clientDisconnected = true;
-                                         // Don't throw error, continue accumulating for background processing
-                                     } else {
-                                         throw writeError; // Re-throw if it's a different error
-                                     }
+                                     console.error(`[API Route /stream/${debateId}] Error writing to transform stream:`, writeError);
+                                     throw writeError; // Re-throw to be caught by outer try-catch
                                  }
 
                              } else {
@@ -385,41 +510,17 @@ Text: ${item.text}
                      }
                  }
              }
-             
-             // Only try to close writer if client is still connected
-             if (!clientDisconnected) {
-                 try {
-                     await writer.close();
-                     console.log(`[API Route /stream/${debateId}] Gemini stream finished, writer closed.`);
-                 } catch (closeError: any) {
-                     if (closeError.message?.includes('closed') || closeError.code === 'ERR_INVALID_STATE') {
-                         console.log(`[API Route /stream/${debateId}] Client disconnected during close, continuing background processing...`);
-                         clientDisconnected = true;
-                     } else {
-                         throw closeError;
-                     }
-                 }
-             } else {
-                 console.log(`[API Route /stream/${debateId}] Gemini stream finished, client already disconnected, skipping writer close.`);
-             }
+             // Close the writer once the generator is finished
+             await writer.close();
+             console.log(`[API Route /stream/${debateId}] Gemini stream finished, writer closed.`);
         } catch (err: any) {
             console.error(`[API Route /stream/${debateId}] Error reading/writing Gemini stream:`, err);
-            
-            // Check if this is a client disconnection error
-            if (err.message?.includes('closed') || err.code === 'ERR_INVALID_STATE') {
-                console.log(`[API Route /stream/${debateId}] Client disconnection detected, continuing background processing...`);
-                clientDisconnected = true;
-                // Don't treat client disconnection as a stream error for persistence purposes
-            } else {
-                streamError = err; // Only store as error if it's not a client disconnection
-                // Try to abort the writer, but don't fail if client is already disconnected
-                if (!clientDisconnected) {
-                    await writer.abort(err).catch(abortErr => {
-                         console.error(`[API Route /stream/${debateId}] Error aborting writer:`, abortErr);
-                    });
-                    console.log(`[API Route /stream/${debateId}] Writer aborted due to error.`);
-                }
-            }
+            streamError = err; // Store error
+            // Abort the writer on error
+            await writer.abort(err).catch(abortErr => { // Catch potential error during abort
+                 console.error(`[API Route /stream/${debateId}] Error aborting writer:`, abortErr);
+            });
+            console.log(`[API Route /stream/${debateId}] Writer aborted due to error.`);
         } finally {
              // Clean up interval regardless of success or failure
             if (pingIntervalId) {
@@ -431,7 +532,7 @@ Text: ${item.text}
 
             // --- Persist to Supabase ---
             if (streamError) {
-                // Handle actual failure (not client disconnection)
+                // Handle failure
                 console.error(`[API Route /stream/${debateId}] Stream failed. Updating status to 'failed'. Error: ${streamError.message}`);
                 const { error: updateError } = await supabase
                     .from('casual_debates_uwhatgov')
@@ -445,12 +546,8 @@ Text: ${item.text}
                     console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' in Supabase:`, updateError);
                 }
             } else if (hasSentValidSpeech && accumulatedSpeeches.length > 0) {
-                // Handle success (regardless of whether client disconnected)
-                if (clientDisconnected) {
-                    console.log(`[API Route /stream/${debateId}] Background generation completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
-                                 } else {
-                     console.log(`[API Route /stream/${debateId}] Stream completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
-                 }
+                // Handle success
+                console.log(`[API Route /stream/${debateId}] Stream completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
                 const finalContent = {
                     title: debateTitle, // Use the title fetched earlier
                     speeches: accumulatedSpeeches
@@ -495,17 +592,53 @@ Text: ${item.text}
     // Start the piping process in the background. DO NOT await this.
     pipeGeneratorToStream();
 
-    // Encode the string output of the transform stream to bytes (UTF-8)
-    const encodedStream = transformStream.readable.pipeThrough(new TextEncoderStream());
+    // Create a response stream for the initial requester that consumes the transform stream
+    let initialController: ReadableStreamDefaultController<string> | null = null;
+    
+    // Connect the transform stream's readable side to consume it and prevent backpressure
+    const transformReader = transformStream.readable.getReader();
+    const consumeTransformStream = async () => {
+        try {
+            while (true) {
+                const { done, value } = await transformReader.read();
+                if (done) break;
+                // The transform stream outputs the formatted SSE data, 
+                // but we're using broadcastToSubscribers instead
+                // So we just consume and discard the output to prevent backpressure
+            }
+        } catch (error) {
+            console.log(`[API Route /stream/${debateId}] Transform stream reader error:`, error);
+        }
+    };
+    
+    // Start consuming the transform stream in the background
+    consumeTransformStream();
+    
+    const initialStream = new ReadableStream({
+        start(controller) {
+            initialController = controller;
+            console.log(`[API Stream /${debateId}] Initial requester subscribed to new stream`);
+            streamInfo.subscribers.add(controller);
+            
+            // Send initial ping
+            const pingEvent = { type: 'ping' };
+            controller.enqueue(`data: ${JSON.stringify(pingEvent)}\n\n`);
+        },
+        cancel() {
+            console.log(`[API Stream /${debateId}] Initial requester disconnected`);
+            if (streamInfo && initialController) {
+                streamInfo.subscribers.delete(initialController);
+            }
+        }
+    });
 
-    // Return the readable side of the transform stream to the client immediately
-    // Use the encoded stream which yields Uint8Arrays
-    return new Response(encodedStream, {
+    // Return the readable stream for the initial requester
+    return new Response(initialStream.pipeThrough(new TextEncoderStream()), {
         headers: {
             'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache, no-transform', // Ensure no caching/transform
+            'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no', // Nginx: prevent buffering
+            'X-Accel-Buffering': 'no',
         },
     });
 }

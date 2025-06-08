@@ -139,7 +139,7 @@ import {
   
     // Prompt asking for an array, referencing original index
     const prompt = `
-  You are an AI assistant transforming UK parliamentary debate transcripts into a casual, modern group chat format, outputting structured JSON.
+  You are an AI assistant transforming UK parliamentary debate transcripts into a casual, entertaining group chat format, outputting structured JSON.
   
   **Task:** Rewrite the following debate transcript segment(s) into a sequence of chat messages.
   *   Process the provided transcript text.
