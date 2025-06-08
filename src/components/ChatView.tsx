@@ -68,7 +68,7 @@ const ChatView = forwardRef(({
     onBubbleClick,
     searchQuery, // Destructure new prop
     highlightedIndex, // Destructure new prop
-    onRewrittenDebateUpdate // Destructure new prop
+    onRewrittenDebateUpdate, // Destructure new prop
 }: ChatViewProps, ref): React.ReactNode => {
   const [rewrittenDebate, setRewrittenDebate] = useState<RewrittenDebate | null>(null);
   const [isLoadingRewritten, setIsLoadingRewritten] = useState(true);
@@ -117,6 +117,8 @@ const ChatView = forwardRef(({
   const speechDisplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  
+
 
   // Functions to manage daily generation limits for unauthenticated users
   const getDailyGenerationKey = () => {
@@ -176,7 +178,7 @@ const ChatView = forwardRef(({
     // Use the imported supabase client
     const { data, error } = await supabase
       .from('reactions_uwhatgov')
-      .select('speech_original_index, emoji, user_id')
+              .select('speech_index, emoji, user_id')
       .eq('debate_id', currentDebateId);
 
     if (error) {
@@ -192,8 +194,8 @@ const ChatView = forwardRef(({
     const intermediateMap = new Map<string, { count: number; userReacted: boolean }>();
 
     (data as ReactionRow[]).forEach(reaction => {
-        if (reaction.speech_original_index === null || reaction.emoji === null) return;
-        const key = `${reaction.speech_original_index}-${reaction.emoji}`;
+        if (reaction.speech_index === null || reaction.emoji === null) return;
+        const key = `${reaction.speech_index}-${reaction.emoji}`;
         const current = intermediateMap.get(key) ?? { count: 0, userReacted: false };
         intermediateMap.set(key, {
             count: current.count + 1,
@@ -330,7 +332,7 @@ const ChatView = forwardRef(({
         const response = await fetch('/api/react', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ debate_id: debateId, speech_original_index: speechIndex, emoji }),
+            body: JSON.stringify({ debate_id: debateId, speech_index: speechIndex, emoji }),
         });
 
         const result = await response.json();
@@ -709,7 +711,7 @@ const ChatView = forwardRef(({
         return true;
       }
       return false;
-    } catch (error) {
+    } catch (_error) {
       console.log(`[ChatView] No ongoing stream for ${debateIdRef.current}`);
       return false;
     }
@@ -922,6 +924,8 @@ const ChatView = forwardRef(({
       console.log(`[ChatView] Bubble click index: ${index}. Calling parent.`);
       onBubbleClick(index); // Call the callback passed from parent
   }, [onBubbleClick]);
+
+
 
   // Effect to automatically scroll down during streaming if near the bottom
   useEffect(() => {
@@ -1336,6 +1340,8 @@ const ChatView = forwardRef(({
         </div>
         <div ref={chatEndRef} />
       </div>
+
+
 
       {/* Jump to Bottom Button */}
       {!isNearBottom && (

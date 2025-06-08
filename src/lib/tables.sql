@@ -55,19 +55,19 @@ FOR SELECT USING (true);
 
 -- Table to store emoji reactions on debates
 CREATE TABLE reactions_uwhatgov (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     debate_id TEXT NOT NULL REFERENCES casual_debates_uwhatgov(id) ON DELETE CASCADE,
-    speech_original_index INTEGER NOT NULL, -- Added: Index of the speech within the debate content
+    speech_index INTEGER NOT NULL, -- Index of the speech within the debate content
     emoji TEXT NOT NULL CHECK (char_length(emoji) > 0), -- Ensure emoji is not empty
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     -- Prevent duplicate reactions from the same user on the same speech with the same emoji
-    UNIQUE (user_id, debate_id, speech_original_index, emoji)
+    UNIQUE (user_id, debate_id, speech_index, emoji)
 );
 
 -- Indexes for efficient querying
--- Composite index might be better depending on query patterns
-CREATE INDEX idx_reactions_debate_id_speech_index ON reactions_uwhatgov(debate_id, speech_original_index);
+CREATE INDEX idx_reactions_debate_id_speech_index ON reactions_uwhatgov(debate_id, speech_index);
 CREATE INDEX idx_reactions_user_id ON reactions_uwhatgov(user_id);
 
 -- Enable Row Level Security
@@ -86,5 +86,81 @@ CREATE POLICY "Allow users to delete their own reactions"
 ON reactions_uwhatgov
 FOR DELETE USING (auth.uid() = user_id);
 
--- Optional: Grant usage on sequence if needed for specific roles (usually handled by Supabase)
--- GRANT USAGE, SELECT ON SEQUENCE reactions_uwhatgov_id_seq TO authenticated;
+-- Chat conversations table for AI chat functionality
+CREATE TABLE chat_conversations_uwhatgov (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    debate_id TEXT NOT NULL REFERENCES casual_debates_uwhatgov(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Chat messages table for storing conversation history
+CREATE TABLE chat_messages_uwhatgov (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES chat_conversations_uwhatgov(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Indexes for efficient querying
+CREATE INDEX idx_chat_conversations_user_debate ON chat_conversations_uwhatgov(user_id, debate_id);
+CREATE INDEX idx_chat_conversations_updated_at ON chat_conversations_uwhatgov(updated_at DESC);
+CREATE INDEX idx_chat_messages_conversation ON chat_messages_uwhatgov(conversation_id, created_at);
+
+-- Add trigger to update updated_at on conversation changes
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+   NEW.updated_at = timezone('utc'::text, now());
+   RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Apply triggers
+CREATE TRIGGER update_chat_conversations_updated_at
+BEFORE UPDATE ON chat_conversations_uwhatgov
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- Enable Row Level Security
+ALTER TABLE chat_conversations_uwhatgov ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_messages_uwhatgov ENABLE ROW LEVEL SECURITY;
+
+-- Policies for chat conversations
+CREATE POLICY "Users can view their own conversations"
+ON chat_conversations_uwhatgov
+FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create their own conversations"
+ON chat_conversations_uwhatgov
+FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own conversations"
+ON chat_conversations_uwhatgov
+FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own conversations"
+ON chat_conversations_uwhatgov
+FOR DELETE USING (auth.uid() = user_id);
+
+-- Policies for chat messages
+CREATE POLICY "Users can view messages in their own conversations"
+ON chat_messages_uwhatgov
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM chat_conversations_uwhatgov 
+        WHERE id = conversation_id AND user_id = auth.uid()
+    )
+);
+
+CREATE POLICY "Users can create messages in their own conversations"
+ON chat_messages_uwhatgov
+FOR INSERT WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM chat_conversations_uwhatgov 
+        WHERE id = conversation_id AND user_id = auth.uid()
+    )
+);

@@ -209,7 +209,7 @@ export async function GET() {
     // 2. Fetch ALL Reactions (Consider adding date range filter later for performance)
     const { data: allReactionsData, error: allReactionsError } = await supabase
       .from('reactions_uwhatgov')
-      .select('id, user_id, debate_id, speech_original_index, emoji, created_at')
+      .select('id, user_id, debate_id, speech_index, emoji, created_at, updated_at')
       // .gte('created_at', 'YYYY-MM-DD') // Example: Filter by date if needed
       .order('created_at', { ascending: false });
 
@@ -267,7 +267,7 @@ export async function GET() {
     const userReactionsWithDetails: UserReaction[] = userBaseReactions.map(r => {
         const debateMeta = debateMetadataMap.get(r.debate_id);
         const { title, speeches } = parseDebateContent(debateMeta?.content ?? null, r.debate_id); // Use helper
-        const speech = speeches.find(s => s.originalIndex === r.speech_original_index);
+        const speech = speeches.find(s => s.originalIndex === r.speech_index);
 
         return {
             ...r,
@@ -356,7 +356,7 @@ export async function GET() {
             // Minimal parsing just to find the relevant speech/speaker?
             // For now, full parse via helper is simpler, accept performance hit.
             const { speeches: allSpeechesInDebate } = parseDebateContent(debateMeta.content, reaction.debate_id);
-            speech = allSpeechesInDebate.find(s => s.originalIndex === reaction.speech_original_index);
+            speech = allSpeechesInDebate.find(s => s.originalIndex === reaction.speech_index);
             speakerName = speech?.speaker;
         } else {
             // console.warn(`No debate content found for reaction on debate ${reaction.debate_id}`);

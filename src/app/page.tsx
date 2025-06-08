@@ -15,6 +15,7 @@ import SummaryViewer from '@/components/SummaryViewer'; // Import new component
 import OriginalContribution from '@/components/OriginalContribution'; // Import updated component
 import SearchHeader from '@/components/SearchHeader'; // Import new component
 import CookieConsentBanner from '@/components/CookieConsentBanner'; // Import cookie banner
+import IntegratedChat from '@/components/IntegratedChat'; // Import integrated chat
 
 // Import types
 import { InternalDebateSummary, DebateMetadata } from '@/types';
@@ -32,6 +33,18 @@ interface ChatViewHandle {
   triggerStream: () => void;
 }
 
+const SendIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+    <path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.896 28.896 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.896 28.896 0 0 0 3.105 2.288Z" />
+  </svg>
+);
+
+const ChatIcon = () => (
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+  <path fillRule="evenodd" d="M10 2c-2.236 0-4.43.18-6.57.524C1.993 2.755 1 4.014 1 5.426v5.148c0 1.413.993 2.67 2.43 2.902.848.137 1.705.248 2.57.331v3.443a.75.75 0 0 0 1.28.53l3.58-3.579a.78.78 0 0 1 .527-.224 41.202 41.202 0 0 0 5.183-.5c1.437-.232 2.43-1.49 2.43-2.903V5.426c0-1.413-.993-2.67-2.43-2.902A41.289 41.289 0 0 0 10 2Zm0 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm5 1a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+</svg>
+);
+
 // Icons for view toggle
 const CasualIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M 26.6875 12.6602 C 26.9687 12.6602 27.1094 12.4961 27.1797 12.2383 C 27.9062 8.3242 27.8594 8.2305 31.9375 7.4570 C 32.2187 7.4102 32.3828 7.2461 32.3828 6.9648 C 32.3828 6.6836 32.2187 6.5195 31.9375 6.4726 C 27.8828 5.6524 28.0000 5.5586 27.1797 1.6914 C 27.1094 1.4336 26.9687 1.2695 26.6875 1.2695 C 26.4062 1.2695 26.2656 1.4336 26.1953 1.6914 C 25.3750 5.5586 25.5156 5.6524 21.4375 6.4726 C 21.1797 6.5195 20.9922 6.6836 20.9922 6.9648 C 20.9922 7.2461 21.1797 7.4102 21.4375 7.4570 C 25.5156 8.2774 25.4687 8.3242 26.1953 12.2383 C 26.2656 12.4961 26.4062 12.6602 26.6875 12.6602 Z M 15.3438 28.7852 C 15.7891 28.7852 16.0938 28.5039 16.1406 28.0821 C 16.9844 21.8242 17.1953 21.8242 23.6641 20.5821 C 24.0860 20.5117 24.3906 20.2305 24.3906 19.7852 C 24.3906 19.3633 24.0860 19.0586 23.6641 18.9883 C 17.1953 18.0977 16.9609 17.8867 16.1406 11.5117 C 16.0938 11.0899 15.7891 10.7852 15.3438 10.7852 C 14.9219 10.7852 14.6172 11.0899 14.5703 11.5352 C 13.7969 17.8164 13.4687 17.7930 7.0469 18.9883 C 6.6250 19.0821 6.3203 19.3633 6.3203 19.7852 C 6.3203 20.2539 6.6250 20.5117 7.1406 20.5821 C 13.5156 21.6133 13.7969 21.7774 14.5703 28.0352 C 14.6172 28.5039 14.9219 28.7852 15.3438 28.7852 Z M 31.2344 54.7305 C 31.8438 54.7305 32.2891 54.2852 32.4062 53.6524 C 34.0703 40.8086 35.8750 38.8633 48.5781 37.4570 C 49.2344 37.3867 49.6797 36.8945 49.6797 36.2852 C 49.6797 35.6758 49.2344 35.2070 48.5781 35.1133 C 35.8750 33.7070 34.0703 31.7617 32.4062 18.9180 C 32.2891 18.2852 31.8438 17.8633 31.2344 17.8633 C 30.6250 17.8633 30.1797 18.2852 30.0860 18.9180 C 28.4219 31.7617 26.5938 33.7070 13.9140 35.1133 C 13.2344 35.2070 12.7891 35.6758 12.7891 36.2852 C 12.7891 36.8945 13.2344 37.3867 13.9140 37.4570 C 26.5703 39.1211 28.3281 40.8321 30.0860 53.6524 C 30.1797 54.2852 30.6250 54.7305 31.2344 54.7305 Z" clipRule="evenodd" /></svg>;
 const OriginalIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M4.25 5.5a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" clipRule="evenodd" /></svg>;
@@ -41,6 +54,7 @@ const OptionsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2
 const RefreshIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M20.944 12.979c-.489 4.509-4.306 8.021-8.944 8.021-2.698 0-5.112-1.194-6.763-3.075l1.245-1.633C7.787 17.969 9.695 19 11.836 19c3.837 0 7.028-2.82 7.603-6.5h-2.125l3.186-4.5 3.186 4.5h-2.742zM12 5c2.2 0 4.157.996 5.445 2.553l-1.31 1.548C14.98 7.725 13.556 7 12 7c-3.837 0-7.028 2.82-7.603 6.5h2.125l-3.186 4.5L.15 13.5h2.742C3.38 8.991 7.196 5 12 5z" clipRule="evenodd" /></svg>;
 // Chevron Down Icon
 const ChevronDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" /></svg>;
+
 
 export default function Home() {
   const router = useRouter();
@@ -106,6 +120,37 @@ export default function Home() {
 
   // State for Mobile Sidebar Toggle
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  
+  // State for Chat Mode (integrated vs overlay)
+  const [chatMode, setChatMode] = useState<'debate' | 'chat'>('debate');
+  
+  // Chat input state
+  const [chatInput, setChatInput] = useState('');
+
+  // Chat input handlers
+  const handleChatInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setChatInput(e.target.value);
+  };
+
+  const handleChatInputSubmit = () => {
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    // Switch to chat mode (the IntegratedChat component will handle the initial message if needed)
+    setChatMode('chat');
+    
+    // Clear the input after switching
+    setChatInput('');
+  };
+
+  const handleChatInputKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleChatInputSubmit();
+    }
+  };
 
   // Get current debate data from caches only when selectedDebateId changes
   const originalDebateState = selectedDebateId ? originalDebateCache.getCachedData(selectedDebateId) : { data: null, isLoading: false, error: null };
@@ -436,35 +481,11 @@ export default function Home() {
                    {/* Right Icons */}
                    <div className="flex items-center gap-1 md:gap-2 text-gray-400 flex-shrink-0">
 
-                     {/* View Mode Toggle */}
-                     <div className="flex items-center border border-gray-600 rounded-full p-0.5 text-xs">
-                       <button
-                         onClick={() => setViewMode('rewritten')}
-                         className={`px-2 py-1 rounded-full flex items-center gap-1 transition-colors ${
-                           viewMode === 'rewritten'
-                             ? 'bg-gray-700 text-white'
-                             : 'text-gray-400 hover:text-gray-200'
-                         }`}
-                         title="Casual View"
-                       >
-                         <CasualIcon />
-                       </button>
-                       <button
-                         onClick={() => setViewMode('original')}
-                         className={`px-2 py-1 rounded-full flex items-center gap-1 transition-colors ${
-                           viewMode === 'original'
-                             ? 'bg-gray-700 text-white'
-                             : 'text-gray-400 hover:text-gray-200'
-                         } disabled:opacity-50 disabled:cursor-not-allowed`}
-                         title="Original View"
-                         disabled={!originalDebate || originalDebateState.isLoading || !!originalDebateState.error} // Disable if no original data or loading/error
-                       >
-                         <OriginalIcon />
-                       </button>
-                     </div>
 
-                     {/* Search Icon */}
-                     {!searchIsOpen && selectedDebateId && (
+
+
+                     {/* Search Icon (only in debate mode) */}
+                     {!searchIsOpen && selectedDebateId && chatMode === 'debate' && (
                          <button
                              onClick={() => setSearchIsOpen(true)}
                              className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -490,8 +511,8 @@ export default function Home() {
                    {/* Options Dropdown Menu */}
                    {isOptionsMenuOpen && (
                      <div className="absolute top-14 right-3 mt-1 w-48 bg-[#2a3942] rounded-md shadow-lg py-1 z-20">
-                       {/* Regenerate Option (Conditional) */}
-                       {viewMode === 'rewritten' && user && (
+                       {/* Regenerate Option (Conditional - only in debate mode) */}
+                       {chatMode === 'debate' && viewMode === 'rewritten' && user && (
                            <button
                                onClick={handleRegenerate}
                                className={`w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${isRegenerating ? 'cursor-wait' : ''}`}
@@ -500,6 +521,37 @@ export default function Home() {
                                <RefreshIcon />
                                {isRegenerating ? 'Regenerating...' : 'Regenerate'}
                            </button>
+                       )}
+
+                       {/* View Mode Options (only in debate mode) */}
+                       {chatMode === 'debate' && (
+                         <>
+                           {viewMode === 'original' && (
+                             <button
+                               onClick={() => {
+                                 setViewMode('rewritten');
+                                 setIsOptionsMenuOpen(false);
+                               }}
+                               className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                             >
+                               <CasualIcon />
+                               Casual View
+                             </button>
+                           )}
+                           {viewMode === 'rewritten' && (
+                             <button
+                               onClick={() => {
+                                 setViewMode('original');
+                                 setIsOptionsMenuOpen(false);
+                               }}
+                               className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                               disabled={!originalDebate || originalDebateState.isLoading || !!originalDebateState.error}
+                             >
+                               <OriginalIcon />
+                               Original View
+                             </button>
+                           )}
+                         </>
                        )}
 
                        {/* User Info & Logout (Conditional) */}
@@ -511,7 +563,7 @@ export default function Home() {
                              onClick={() => setIsOptionsMenuOpen(false)} // Close menu on click
                            >
                              {/* Optional: Add an icon */}
-                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M11.49 3.17a.75.75 0 0 1 1.02.07l3 3a.75.75 0 0 1 .07 1.02l-7 7a.75.75 0 0 1-1.09.02l-4-4a.75.75 0 0 1 1.06-1.06l3.47 3.47L11.49 3.17Z" clipRule="evenodd" /></svg>
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M10,14 C10.5522847,14 11,14.4477153 11,15 L11,21 C11,21.5522847 10.5522847,22 10,22 L3,22 C2.44771525,22 2,21.5522847 2,21 L2,15 C2,14.4477153 2.44771525,14 3,14 L10,14 Z M21,9 C21.5522847,9 22,9.44771525 22,10 L22,21 C22,21.5522847 21.5522847,22 21,22 L14,22 C13.4477153,22 13,21.5522847 13,21 L13,10 C13,9.44771525 13.4477153,9 14,9 L21,9 Z M10,2 C10.5522847,2 11,2.44771525 11,3 L11,11 C11,11.5522847 10.5522847,12 10,12 L3,12 C2.44771525,12 2,11.5522847 2,11 L2,3 C2,2.44771525 2.44771525,2 3,2 L10,2 Z M21,2 C21.5522847,2 22,2.44771525 22,3 L22,6 C22,6.55228475 21.5522847,7 21,7 L14,7 C13.4477153,7 13,6.55228475 13,6 L13,3 C13,2.44771525 13.4477153,2 14,2 L21,2 Z" clipRule="evenodd" /></svg>
                              Dashboard
                            </Link>
                            <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-600 mt-1 pt-2">
@@ -553,33 +605,42 @@ export default function Home() {
               onClose={() => setIsSummaryOpen(false)}
             />
 
-            {/* ChatView Wrapper (handles scrolling) */}
-            {/* Added conditional padding top ONLY if summary dropdown is open */}
-            <div className={`flex-1 overflow-y-auto ${isSummaryOpen ? 'pt-2' : ''}`}>
-              <ChatView
-                ref={chatViewRef} // Assign ref
-                debateId={selectedDebateId}
-                viewMode={viewMode}
-                originalDebateData={originalDebate}
-                isLoadingOriginal={originalDebateState.isLoading}
-                errorOriginal={originalDebateState.error}
-                                 fetchOriginalDebate={() => originalDebateCache.fetchData(selectedDebateId, fetchOriginalDebateFromAPI)} // Pass fetch function
-                selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
-                onBubbleClick={(index) => {
-                  console.log(`[page.tsx] Bubble clicked, setting index: ${index}`);
-                  setSelectedOriginalIndex(index ?? null); // Set to null if index is undefined
-                  // Don't auto-expand the panel, let user decide via the tab
-                }} // Pass handler down
-                searchQuery={currentSearchQuery} // Pass search query
-                highlightedIndex={highlightedIndex} // Pass highlighted item's index
-                onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback
-                // Pass stream completion handler (if implemented in ChatView)
-                // onStreamComplete={handleStreamComplete}
-              />
+            {/* Main Content Area */}
+            <div className={`flex-1 overflow-hidden ${isSummaryOpen ? 'pt-2' : ''}`}>
+              {chatMode === 'debate' ? (
+                <div className="h-full overflow-y-auto">
+                  <ChatView
+                    ref={chatViewRef} // Assign ref
+                    debateId={selectedDebateId}
+                    viewMode={viewMode}
+                    originalDebateData={originalDebate}
+                    isLoadingOriginal={originalDebateState.isLoading}
+                    errorOriginal={originalDebateState.error}
+                    fetchOriginalDebate={() => originalDebateCache.fetchData(selectedDebateId, fetchOriginalDebateFromAPI)} // Pass fetch function
+                    selectedOriginalIndex={selectedOriginalIndex} // Pass state down for panel
+                    onBubbleClick={(index) => {
+                      console.log(`[page.tsx] Bubble clicked, setting index: ${index}`);
+                      setSelectedOriginalIndex(index ?? null); // Set to null if index is undefined
+                      // Don't auto-expand the panel, let user decide via the tab
+                    }} // Pass handler down
+                    searchQuery={currentSearchQuery} // Pass search query
+                    highlightedIndex={highlightedIndex} // Pass highlighted item's index
+                    onRewrittenDebateUpdate={handleRewrittenDebateUpdate} // Pass stable callback
+                    // Pass stream completion handler (if implemented in ChatView)
+                    // onStreamComplete={handleStreamComplete}
+                  />
+                </div>
+              ) : (
+                <IntegratedChat
+                  debateId={selectedDebateId}
+                  debateTitle={selectedDebateSummary?.title || originalDebate?.Overview?.Title}
+                  setChatMode={setChatMode}
+                />
+              )}
             </div>
 
-            {/* Original Contribution - visible when an index is selected */}
-            {selectedOriginalIndex !== null && selectedOriginalItem && (
+            {/* Original Contribution - visible when an index is selected and in debate mode */}
+            {chatMode === 'debate' && selectedOriginalIndex !== null && selectedOriginalItem && (
               <OriginalContribution
                 key={`original-panel-${selectedOriginalIndex}`}
                 item={selectedOriginalItem}
@@ -595,11 +656,51 @@ export default function Home() {
               />
             )}
 
-            {/* Footer */}
-            <footer className="p-3 border-t border-gray-700 bg-[#202c33] flex items-center gap-3 flex-shrink-0 z-10 h-16">
-              {/* Simplified footer - Summary is now in the header dropdown */}
-              <input type="text" placeholder="u what, gov?" className="flex-grow p-2 rounded-md bg-[#2a3942] text-gray-300 placeholder-gray-500 focus:outline-none" disabled />
-            </footer>
+            {/* Chat Input Area - Only show when debate is selected and in debate mode */}
+            {selectedDebateId && chatMode === 'debate' && (
+              <div className="border-t border-gray-700 bg-[#202c33] p-3 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={handleChatInputChange}
+                    onKeyPress={handleChatInputKeyPress}
+                    placeholder="You what, gov?"
+                    className="flex-1 bg-[#2a3942] border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    disabled={!user && !authLoading}
+                  />
+                  <button
+                    onClick={handleChatInputSubmit}
+                    disabled={!user && !authLoading}
+                    className={`p-2 rounded-lg text-white transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      chatInput.trim() && user
+                        ? 'bg-indigo-600 hover:bg-indigo-700'
+                        : 'bg-gray-600 hover:bg-gray-700'
+                    }`}
+                    title={!user ? "Sign in to ask questions" : chatInput.trim() ? "Send message" : "Start chat"}
+                  >
+                    {chatInput.trim() && user ? (
+                      // Send icon when user has typed something
+                      <SendIcon />
+                    ) : (
+                      // Chat icon for switching to chat mode
+                      <ChatIcon />
+                    )}
+                  </button>
+                </div>
+                {!user && !authLoading && (
+                  <p className="text-xs text-gray-400 mt-2 text-center">
+                    <button
+                      onClick={() => setIsAuthModalOpen(true)}
+                      className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                    >
+                      Sign in
+                    </button>
+                    {' '}to ask questions about this debate
+                  </p>
+                )}
+              </div>
+            )}
 
           </>
         ) : (

@@ -498,40 +498,65 @@ export type Database = {
         }
         Relationships: []
       }
+      profiles_uwhatgov: {
+        Row: {
+          created_at: string
+          id: string
+          is_pro: boolean | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          stripe_subscription_status: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          is_pro?: boolean | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          stripe_subscription_status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_pro?: boolean | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          stripe_subscription_status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       reactions_uwhatgov: {
         Row: {
           created_at: string
           debate_id: string
           emoji: string
-          id: number
-          speech_original_index: number
+          id: string
+          speech_index: number
+          updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
           debate_id: string
           emoji: string
-          id?: number
-          speech_original_index: number
+          id?: string
+          speech_index: number
+          updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
           debate_id?: string
           emoji?: string
-          id?: number
-          speech_original_index?: number
+          id?: string
+          speech_index?: number
+          updated_at?: string
           user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "reactions_uwhatgov_debate_id_fkey"
-            columns: ["debate_id"]
-            isOneToOne: false
-            referencedRelation: "casual_debates_uwhatgov"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       saved_calendar_items: {
         Row: {
@@ -902,6 +927,65 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      chat_conversations_uwhatgov: {
+        Row: {
+          id: string
+          user_id: string
+          debate_id: string
+          title: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          debate_id: string
+          title: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          debate_id?: string
+          title?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      chat_messages_uwhatgov: {
+        Row: {
+          id: string
+          conversation_id: string
+          role: 'user' | 'assistant'
+          content: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          conversation_id: string
+          role: 'user' | 'assistant'
+          content: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          conversation_id?: string
+          role?: 'user' | 'assistant'
+          content?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_conversations_uwhatgov"
+            referencedColumns: ["id"]
+          }
+        ]
       }
     }
     Views: {

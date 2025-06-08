@@ -297,7 +297,7 @@ Text: ${item.text}
         for (const controller of streamInfo.subscribers) {
             try {
                 controller.enqueue(data);
-            } catch (error) {
+            } catch (_error) {
                 console.log(`[API Route /stream/${debateId}] Removing dead subscriber controller`);
                 deadControllers.add(controller);
             }
@@ -373,7 +373,7 @@ Text: ${item.text}
             }
         },
         // Flush is called when the writable side is closed
-        flush(controller) {
+        flush(_controller) {
             // Send any remaining buffered narrative message before finishing
             sendBufferedNarrative(); // Use the shared helper
 
@@ -413,7 +413,7 @@ Text: ${item.text}
             for (const subscriberController of streamInfo.subscribers) {
                 try {
                     subscriberController.close();
-                } catch (error) {
+                } catch (_error) {
                     // Ignore errors when closing
                 }
             }
@@ -600,7 +600,7 @@ Text: ${item.text}
     const consumeTransformStream = async () => {
         try {
             while (true) {
-                const { done, value } = await transformReader.read();
+                const { done } = await transformReader.read();
                 if (done) break;
                 // The transform stream outputs the formatted SSE data, 
                 // but we're using broadcastToSubscribers instead

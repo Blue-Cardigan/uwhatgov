@@ -145,7 +145,8 @@ import {
   *   Process the provided transcript text.
   *   For each contribution or significant narrative point, create a JSON object with "speaker", "text", "originalIndex", and "originalSnippet" fields.
   *   Use the actual speaker's name or "Speaker" if the speaker is not known.
-  *   Rewrite the "text" concisely and informally for a chat context, using British English spelling.
+  *   Rewrite the "text" concisely and informally for a chat context, using British English spelling. Include emojis with text-style language where appropriate.
+  *   The following markdown formatting for the "text" field is available: *bold*, _italic_, ~strikethrough~, * bulletted list, 1. numbered list, > quote.
   *   The "originalIndex" MUST correspond to the original index of the Hansard item from the FULL debate transcript. The first item provided to you corresponds to original index ${startIndex}.
   *   The "originalSnippet" MUST be the first 15 words of the original text for that item.
   *   Maintain the original order of contributions.

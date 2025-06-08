@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server';
 
 interface ReactRequestBody {
 	debate_id: string;
-	speech_original_index: number;
+	speech_index: number;
 	emoji: string;
 }
 
@@ -28,14 +28,14 @@ export const POST = async (request: NextRequest) => {
 		return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
 	}
 
-	const { debate_id, speech_original_index, emoji } = requestBody;
+	const { debate_id, speech_index, emoji } = requestBody;
 
 	// Validate input
 	if (!debate_id || typeof debate_id !== 'string') {
 		return NextResponse.json({ error: 'Missing or invalid debate_id' }, { status: 400 });
 	}
-	if (typeof speech_original_index !== 'number' || !Number.isInteger(speech_original_index) || speech_original_index < 0) {
-		return NextResponse.json({ error: 'Missing or invalid speech_original_index' }, { status: 400 });
+	if (typeof speech_index !== 'number' || !Number.isInteger(speech_index) || speech_index < 0) {
+		return NextResponse.json({ error: 'Missing or invalid speech_index' }, { status: 400 });
 	}
 	if (!emoji || typeof emoji !== 'string' || emoji.length === 0) {
 		return NextResponse.json({ error: 'Missing or invalid emoji' }, { status: 400 });
@@ -48,7 +48,7 @@ export const POST = async (request: NextRequest) => {
 			.select('id')
 			.eq('user_id', user_id)
 			.eq('debate_id', debate_id)
-			.eq('speech_original_index', speech_original_index)
+			.eq('speech_index', speech_index)
 			.eq('emoji', emoji)
 			.maybeSingle();
 
@@ -62,7 +62,7 @@ export const POST = async (request: NextRequest) => {
 			const { error: deleteError } = await supabase
 				.from('reactions_uwhatgov')
 				.delete()
-				.match({ user_id, debate_id, speech_original_index, emoji });
+				.match({ user_id, debate_id, speech_index, emoji });
 
 			if (deleteError) {
 				console.error('Error deleting reaction:', deleteError);
@@ -74,7 +74,7 @@ export const POST = async (request: NextRequest) => {
 			// Reaction doesn't exist, so insert it (toggle on)
 			const { error: insertError } = await supabase
 				.from('reactions_uwhatgov')
-				.insert([{ user_id, debate_id, speech_original_index, emoji }]);
+				.insert([{ user_id, debate_id, speech_index, emoji }]);
 
 			if (insertError) {
 				// Handle potential race condition if reaction was added between check and insert
