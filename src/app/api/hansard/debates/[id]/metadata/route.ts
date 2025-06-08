@@ -20,15 +20,25 @@ function parseHrsTag(hrsTag: string | null): string {
         case 'hs_3cMainHdg': return 'Generic Topic';
         case 'hs_8Petition': return 'Petition';
         case 'hs_2cBillTitle': return 'Bill Reading';
+        case 'hs_2cStatement': return 'Statement';
+        case 'hs_2cUrgentQuestion': return 'Urgent Question';
+        case 'hs_8Question': return 'Question';
+        case 'hs_6bDepartment': return 'Department Question';
+        case 'hs_ Venue': return 'Venue';
+        case 'hs_Venue': return 'Venue';
         case 'BigBoldHdg': return 'Bold Header';
+        case 'hs_3OralAnswers': return 'Oral Answers';
+        case 'hs_2WestHallDebate': return 'Westminster Hall Debate';
         default:
-            console.warn(`[API Metadata] Unmapped HRSTag: ${hrsTag}`);
+            console.warn(`[API Metadata] Unmapped HRSTag: "${hrsTag}" (type: ${typeof hrsTag}, length: ${hrsTag?.length})`);
             // Attempt to make a generic name from the tag
-            return hrsTag
+            const genericName = hrsTag
                 .replace(/^hs_\d+[a-z]?/, '') // Remove prefix like hs_2c
                 .replace(/([A-Z])/g, ' $1') // Add space before capital letters
                 .replace(' Hdg', '')
                 .trim() || 'Unknown Type';
+            console.log(`[API Metadata] Generic parsing result: "${genericName}" from "${hrsTag}"`);
+            return genericName;
     }
 }
 

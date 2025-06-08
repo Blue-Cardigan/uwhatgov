@@ -1,12 +1,3 @@
--- Table to store original Hansard debate JSON data
--- REMOVED: No longer storing original Hansard data
--- CREATE TABLE debates_uwhatgov (
---     id UUID PRIMARY KEY,
---     data JSONB NOT NULL,
---     fetched_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
---     last_accessed_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
--- );
-
 -- Optional: Function to update last_accessed_at timestamp automatically
 -- Keep this function as it's used by casual_debates_uwhatgov trigger
 CREATE OR REPLACE FUNCTION update_last_accessed_at_column()
@@ -25,7 +16,7 @@ $$ language 'plpgsql';
 
 -- Table to store the generated casual rewrite content
 CREATE TABLE casual_debates_uwhatgov (
-    id UUID PRIMARY KEY, -- Removed foreign key reference
+    id TEXT PRIMARY KEY, -- Changed from UUID to TEXT to handle Hansard debate IDs
     content TEXT,
     summary TEXT, -- Added column for storing the debate summary
     status TEXT NOT NULL DEFAULT 'success', -- e.g., pending, generating, completed, failed
@@ -66,7 +57,7 @@ FOR SELECT USING (true);
 CREATE TABLE reactions_uwhatgov (
     id BIGSERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    debate_id UUID NOT NULL REFERENCES casual_debates_uwhatgov(id) ON DELETE CASCADE,
+    debate_id TEXT NOT NULL REFERENCES casual_debates_uwhatgov(id) ON DELETE CASCADE,
     speech_original_index INTEGER NOT NULL, -- Added: Index of the speech within the debate content
     emoji TEXT NOT NULL CHECK (char_length(emoji) > 0), -- Ensure emoji is not empty
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,

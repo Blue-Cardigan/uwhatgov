@@ -74,6 +74,8 @@ const ChatView = forwardRef(({
   const [isStreaming, setIsStreaming] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
+  const [showGenerateButton, setShowGenerateButton] = useState(false);
+  const [isCheckingCompletion, setIsCheckingCompletion] = useState(false);
   const MAX_RETRIES = 5;
   const INITIAL_RETRY_DELAY_MS = 1000;
   const SPEECH_DISPLAY_DELAY_MS = 750;
@@ -106,46 +108,71 @@ const ChatView = forwardRef(({
   const itemRefs = useRef<Map<number, HTMLDivElement | null>>(new Map()); // Ref map for items
   const [speakerPartyMap, setSpeakerPartyMap] = useState<Map<string, string | null>>(new Map()); // Map base speaker name -> party abbreviation (or null)
   const currentlyFetchingParties = useRef<Set<number>>(new Set()); // Track ongoing party fetches
+  const completionCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Track completion check interval
 
   // Refs for delayed display queue
   const pendingSpeechesQueueRef = useRef<Speech[]>([]);
   const isProcessingQueueRef = useRef<boolean>(false);
   const speechDisplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Expose scrollToItem method to parent via ref
-  useImperativeHandle(ref, () => ({
-    scrollToItem: (index: number) => {
-      const element = itemRefs.current.get(index);
-      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    },
-    // Expose function to trigger stream regeneration
-    triggerStream: () => {
-        if (!debateIdRef.current) {
-            console.warn('[ChatView triggerStream] No debate ID set.');
-            return;
+  // Function to check if background generation has completed
+  const checkBackgroundCompletion = useCallback(async () => {
+    if (!debateId || isCheckingCompletion) return;
+    
+    setIsCheckingCompletion(true);
+    try {
+      const { data: supabaseDataArray, error: supabaseError } = await supabase
+        .from('casual_debates_uwhatgov')
+        .select('content, status')
+        .eq('id', debateId)
+        .limit(1);
+
+      if (!supabaseError && supabaseDataArray?.[0]?.status === 'success' && supabaseDataArray[0].content) {
+        console.log(`[${debateId}] Background generation completed! Loading content...`);
+        
+        // Clear the completion check interval
+        if (completionCheckIntervalRef.current) {
+          clearInterval(completionCheckIntervalRef.current);
+          completionCheckIntervalRef.current = null;
         }
-        console.log(`[ChatView triggerStream] Triggering stream regeneration for ${debateIdRef.current}`);
-        // Reset relevant state before starting new stream
-        eventSourceRef.current?.close(); // Close existing connection if any
-        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current); // Clear pending retries
-        if (speechDisplayTimeoutRef.current) clearTimeout(speechDisplayTimeoutRef.current); // Clear pending speech display
-        setRewrittenDebate(prev => prev ? { ...prev, speeches: [] } : null); // Clear speeches but keep title if already loaded
-        speechesRef.current = [];
-        jsonBufferRef.current = '';
-        pendingSpeechesQueueRef.current = [];
-        isProcessingQueueRef.current = false;
-        setTypingSpeakerInfo(null);
-        setIsReconnecting(false);
-        setRetryAttempt(0);
-
-        // Indicate loading/streaming state
-        setIsLoadingRewritten(false); // Not technically loading from cache anymore
-        setIsStreaming(true);
-
-        // Connect the event source
-        connectEventSource(0);
+        
+        // Parse and load the completed content
+        try {
+          const parsedContent = JSON.parse(supabaseDataArray[0].content);
+          const typedSpeeches = (parsedContent.speeches || []).map((s: any) => ({
+              speaker: s.speaker || '?',
+              text: s.text || '',
+              originalIndex: typeof s.originalIndex === 'number' ? s.originalIndex : undefined,
+              originalSnippet: typeof s.originalSnippet === 'string' ? s.originalSnippet : undefined,
+          }));
+          
+          setRewrittenDebate({ ...parsedContent, speeches: typedSpeeches });
+          speechesRef.current = typedSpeeches;
+          onRewrittenDebateUpdate(speechesRef.current);
+          setIsLoadingRewritten(false);
+          setShowGenerateButton(false);
+          setIsStreaming(false);
+        } catch (parseError) {
+          console.error(`[${debateId}] Error parsing background completion:`, parseError);
+        }
+      } else if (!supabaseError && supabaseDataArray?.[0]?.status === 'failed') {
+        console.log(`[${debateId}] Background generation failed. Stopping checks.`);
+        // Clear the completion check interval
+        if (completionCheckIntervalRef.current) {
+          clearInterval(completionCheckIntervalRef.current);
+          completionCheckIntervalRef.current = null;
+        }
+        setIsStreaming(false);
+        setShowGenerateButton(true); // Allow retry
+      }
+    } catch (error) {
+      console.error(`[${debateId}] Error checking background completion:`, error);
+    } finally {
+      setIsCheckingCompletion(false);
     }
-  }));
+  }, [debateId, isCheckingCompletion, supabase, onRewrittenDebateUpdate]);
+
+  // startGeneration and useImperativeHandle will be defined after connectEventSource
 
   // Function to fetch and aggregate reactions - Updated to use imported supabase client
   const fetchAndAggregateReactions = useCallback(async (currentDebateId: string, fetchedUserId: string | null) => { // Renamed arg to avoid conflict
@@ -666,6 +693,46 @@ const ChatView = forwardRef(({
     };
   }, [debateId, MAX_RETRIES, INITIAL_RETRY_DELAY_MS, processJsonBuffer]);
 
+  // Function to start generation
+  const startGeneration = useCallback(() => {
+    if (!debateIdRef.current || !currentUserId) {
+        console.warn('[ChatView startGeneration] No debate ID or user not authenticated.');
+        return;
+    }
+    console.log(`[ChatView startGeneration] Starting generation for ${debateIdRef.current}`);
+    
+    // Reset relevant state before starting new stream
+    eventSourceRef.current?.close(); // Close existing connection if any
+    if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current); // Clear pending retries
+    if (speechDisplayTimeoutRef.current) clearTimeout(speechDisplayTimeoutRef.current); // Clear pending speech display
+    setRewrittenDebate(prev => prev ? { ...prev, speeches: [] } : null); // Clear speeches but keep title if already loaded
+    speechesRef.current = [];
+    jsonBufferRef.current = '';
+    pendingSpeechesQueueRef.current = [];
+    isProcessingQueueRef.current = false;
+    setTypingSpeakerInfo(null);
+    setIsReconnecting(false);
+    setRetryAttempt(0);
+    setShowGenerateButton(false);
+
+    // Indicate streaming state
+    setIsLoadingRewritten(false); // Not technically loading from cache anymore
+    setIsStreaming(true);
+
+    // Connect the event source
+    connectEventSource(0);
+  }, [currentUserId, connectEventSource]);
+
+  // Expose scrollToItem method to parent via ref
+  useImperativeHandle(ref, () => ({
+    scrollToItem: (index: number) => {
+      const element = itemRefs.current.get(index);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+    // Expose function to trigger stream regeneration
+    triggerStream: startGeneration
+  }));
+
   useEffect(() => {
     if (!debateId) {
       setRewrittenDebate(null);
@@ -704,12 +771,7 @@ const ChatView = forwardRef(({
 
     if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
     eventSourceRef.current?.close();
-
-    // *** Prevent duplicate stream initiation ***
-    if (eventSourceRef.current) {
-       console.warn(`[ChatView setupRewrittenDebate] Stream already exists for ${debateId}. Aborting setup.`);
-       return;
-    }
+    eventSourceRef.current = null; // Explicitly clear the ref after closing
 
     const setupRewrittenDebate = async () => {
       setIsLoadingRewritten(true);
@@ -735,37 +797,58 @@ const ChatView = forwardRef(({
           console.log(`${debateId} loaded from Supabase.`);
           try {
             const parsedContent = JSON.parse(supabaseData.content);
+            console.log(`[${debateId}] Parsed content:`, { title: parsedContent.title, speechCount: parsedContent.speeches?.length });
             const typedSpeeches = (parsedContent.speeches || []).map((s: any) => ({
                 speaker: s.speaker || '?',
                 text: s.text || '',
                 originalIndex: typeof s.originalIndex === 'number' ? s.originalIndex : undefined,
                 originalSnippet: typeof s.originalSnippet === 'string' ? s.originalSnippet : undefined,
             }));
+            console.log(`[${debateId}] Setting rewritten debate with ${typedSpeeches.length} speeches`);
             setRewrittenDebate({ ...parsedContent, speeches: typedSpeeches });
             speechesRef.current = typedSpeeches;
             onRewrittenDebateUpdate(speechesRef.current); // Notify parent of cached data
             setIsLoadingRewritten(false);
+            setShowGenerateButton(false); // Hide generate button since we have content
           } catch (parseError) {
              console.error("Failed parse Supabase content:", parseError);
              setIsLoadingRewritten(false);
           }
+        } else if (supabaseData?.status === 'processing') {
+          // Debate is currently being generated in the background
+          console.log(`${debateId} is being generated in background. Starting completion checks...`);
+          setIsLoadingRewritten(false);
+          setIsStreaming(true); // Show as streaming even though we're not connected
+          setShowGenerateButton(false);
+          setRewrittenDebate(currentDebateData); // Show title while waiting
+          speechesRef.current = [];
+          onRewrittenDebateUpdate([]);
+          
+          // Start checking for completion every 5 seconds
+          if (completionCheckIntervalRef.current) {
+            clearInterval(completionCheckIntervalRef.current);
+          }
+          completionCheckIntervalRef.current = setInterval(checkBackgroundCompletion, 5000);
+          
         } else {
           // No cached version found or status is not 'success'
           console.log(`${debateId} not cached/complete.`);
           // *** Check authentication *before* attempting to stream ***
           if (currentUserId) {
-            console.log(`User ${currentUserId} is logged in, proceeding to stream...`);
+            console.log(`User ${currentUserId} is logged in, showing generate button...`);
             setIsLoadingRewritten(false); // Not loading cache anymore
-            setIsStreaming(true);
-            setRewrittenDebate(currentDebateData); // Show title while loading
+            setIsStreaming(false); // Don't auto-start streaming
+            setShowGenerateButton(true); // Show generate button instead
+            setRewrittenDebate(currentDebateData); // Show title while waiting
             speechesRef.current = [];
             onRewrittenDebateUpdate([]); // Notify parent of empty initial state
-            connectEventSource(0);
+            // Don't auto-connect, wait for button click
           } else {
             // User is not logged in, block streaming
             console.log(`User is not logged in. Blocking stream generation for ${debateId}.`);
             setIsLoadingRewritten(false);
             setIsStreaming(false);
+            setShowGenerateButton(false);
             setRewrittenDebate(null); // Ensure no placeholder/loading title is shown
             // No need to call onRewrittenDebateUpdate as state is effectively empty
           }
@@ -783,6 +866,11 @@ const ChatView = forwardRef(({
       if (retryTimeoutRef.current) {
           clearTimeout(retryTimeoutRef.current);
           console.log(`Cleared retry timeout for ${debateId} on cleanup`);
+      }
+      if (completionCheckIntervalRef.current) {
+          clearInterval(completionCheckIntervalRef.current);
+          completionCheckIntervalRef.current = null;
+          console.log(`Cleared completion check interval for ${debateId} on cleanup`);
       }
       const esToClose = eventSourceRef.current; // Capture ref before clearing
       eventSourceRef.current = null; // Clear ref
@@ -1012,12 +1100,39 @@ const ChatView = forwardRef(({
       }
 
     if (viewMode === 'rewritten') {
+      console.log(`[${debateId}] Render state:`, {
+        authLoading,
+        currentUserId: !!currentUserId,
+        isLoadingRewritten,
+        showGenerateButton,
+        hasRewrittenDebate: !!rewrittenDebate,
+        speechCount: rewrittenDebate?.speeches?.length || 0
+      });
       // NEW: Check for logged-out state first, *only if* not loading and no debate loaded (cache miss)
       if (!authLoading && !currentUserId && !isLoadingRewritten && !rewrittenDebate && debateId) {
         return <div className="p-4 text-center text-yellow-300">You're the first! Log in to generate the Casual Version for this debate.</div>;
       }
 
       if (isLoadingRewritten) return <div className="p-4 text-center text-gray-400">Loading Casual Version...</div>;
+      
+      // Show generate button for authenticated users when no cached data
+      if (showGenerateButton && currentUserId) {
+        return (
+          <div className="p-4 text-center">
+            <button
+              onClick={startGeneration}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out flex items-center gap-2 mx-auto"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                <path fillRule="evenodd" d="M20.944 12.979c-.489 4.509-4.306 8.021-8.944 8.021-2.698 0-5.112-1.194-6.763-3.075l1.245-1.633C7.787 17.969 9.695 19 11.836 19c3.837 0 7.028-2.82 7.603-6.5h-2.125l3.186-4.5 3.186 4.5h-2.742zM12 5c2.2 0 4.157.996 5.445 2.553l-1.31 1.548C14.98 7.725 13.556 7 12 7c-3.837 0-7.028 2.82-7.603 6.5h2.125l-3.186 4.5L.15 13.5h2.742C3.38 8.991 7.196 5 12 5z" clipRule="evenodd" />
+              </svg>
+              Generate Casual Version
+            </button>
+            <p className="text-sm text-gray-500 mt-2">Click to create a casual chat version of this debate</p>
+          </div>
+        );
+      }
+      
       // Handle case where loading finished, user might be logged out, but no data (cache miss AND generation blocked/failed)
       if (!rewrittenDebate) {
           // If user is logged in but still no data, it might be unavailable/error
@@ -1072,7 +1187,7 @@ const ChatView = forwardRef(({
        </div>
        {/* Show specific loading message only when streaming starts and no messages are present yet */} 
        {!isLoadingRewritten && isStreaming && rewrittenDebate.speeches?.length === 0 && (
-             <p className="text-center text-gray-400 italic">You're the first... loading messages...</p>
+             <p className="text-center text-gray-400 italic">loading messages...</p>
            )}
         {/* Show "No speeches found" only if not loading, not streaming, and array is empty */} 
         {!isStreaming && !isLoadingRewritten && rewrittenDebate.speeches?.length === 0 && (

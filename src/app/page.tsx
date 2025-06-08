@@ -648,7 +648,7 @@ export default function Home() {
                    {isOptionsMenuOpen && (
                      <div className="absolute top-14 right-3 mt-1 w-48 bg-[#2a3942] rounded-md shadow-lg py-1 z-20">
                        {/* Regenerate Option (Conditional) */}
-                       {viewMode === 'rewritten' && (
+                       {viewMode === 'rewritten' && user && (
                            <button
                                onClick={handleRegenerate}
                                className={`w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${isRegenerating ? 'cursor-wait' : ''}`}
@@ -805,7 +805,7 @@ export default function Home() {
              )}
           </div>
         )}
-      </div>
+    </div>
       {/* Cookie Consent Banner - Renders outside the main content flow */}
       <CookieConsentBanner />
     </main>

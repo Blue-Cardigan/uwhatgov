@@ -40,7 +40,7 @@ export async function GET(
 
     // Access params *after* await
     const { params } = context; // Destructure params from context
-    const debateId = params.debateId;
+    const debateId = await params.debateId;
 
     if (!user) {
         // Use debateId *after* checking for user, otherwise it might be undefined if accessed before await
@@ -158,12 +158,16 @@ Text: ${item.text}
         // Update status to 'processing' before starting stream
         const { error: statusUpdateError } = await supabase
             .from('casual_debates_uwhatgov')
-            .update({ status: 'success', last_updated_at: new Date().toISOString() })
-            .eq('id', debateId);
-         if (statusUpdateError && statusUpdateError.code !== 'PGRST116') { // Ignore error if row doesn't exist yet
-             console.warn(`[API Route /stream/${debateId}] Failed to update status to success (might be new debate):`, statusUpdateError.message);
-         } else if (!statusUpdateError) {
-             console.log(`[API Route /stream/${debateId}] Updated status to success.`);
+            .upsert({ 
+                id: debateId, 
+                status: 'processing', 
+                last_updated_at: new Date().toISOString(),
+                error_message: null
+            }, { onConflict: 'id' });
+         if (statusUpdateError) {
+             console.warn(`[API Route /stream/${debateId}] Failed to update status to processing:`, statusUpdateError.message);
+         } else {
+             console.log(`[API Route /stream/${debateId}] Updated status to processing.`);
          }
 
         geminiStreamResult = await generateDebateStream(combinedText, debateTitle, startIndex);
@@ -290,6 +294,7 @@ Text: ${item.text}
         const writer = transformStream.writable.getWriter();
         const accumulatedSpeeches: Speech[] = []; // Accumulate speeches here
         let streamError: Error | null = null;
+        let clientDisconnected = false; // Track if client disconnected
 
         // Buffer for raw text from Gemini stream
         let geminiBuffer = '';
@@ -349,8 +354,19 @@ Text: ${item.text}
                                      accumulatedSpeeches.push(parsedSpeech); // Add regular speech
                                  }
                                  hasSentValidSpeech = true; // Mark that we have valid data
-                                 // Write the *validated object* to the TransformStream writer
-                                 await writer.write(parsedSpeech);
+                                 
+                                 // Try to write to client, but don't fail if client disconnected
+                                 try {
+                                     await writer.write(parsedSpeech);
+                                 } catch (writeError: any) {
+                                     if (writeError.message?.includes('closed') || writeError.code === 'ERR_INVALID_STATE') {
+                                         console.log(`[API Route /stream/${debateId}] Client disconnected, continuing generation in background...`);
+                                         clientDisconnected = true;
+                                         // Don't throw error, continue accumulating for background processing
+                                     } else {
+                                         throw writeError; // Re-throw if it's a different error
+                                     }
+                                 }
 
                              } else {
                                  console.warn(`[API Route /stream/${debateId} Accumulate] Skipping invalid speech object: ${potentialJson.substring(0,100)}...`);
@@ -368,17 +384,41 @@ Text: ${item.text}
                      }
                  }
              }
-             // Close the writer once the generator is finished
-             await writer.close();
-             console.log(`[API Route /stream/${debateId}] Gemini stream finished, writer closed.`);
+             
+             // Only try to close writer if client is still connected
+             if (!clientDisconnected) {
+                 try {
+                     await writer.close();
+                     console.log(`[API Route /stream/${debateId}] Gemini stream finished, writer closed.`);
+                 } catch (closeError: any) {
+                     if (closeError.message?.includes('closed') || closeError.code === 'ERR_INVALID_STATE') {
+                         console.log(`[API Route /stream/${debateId}] Client disconnected during close, continuing background processing...`);
+                         clientDisconnected = true;
+                     } else {
+                         throw closeError;
+                     }
+                 }
+             } else {
+                 console.log(`[API Route /stream/${debateId}] Gemini stream finished, client already disconnected, skipping writer close.`);
+             }
         } catch (err: any) {
             console.error(`[API Route /stream/${debateId}] Error reading/writing Gemini stream:`, err);
-            streamError = err; // Store error
-            // Abort the writer on error
-            await writer.abort(err).catch(abortErr => { // Catch potential error during abort
-                 console.error(`[API Route /stream/${debateId}] Error aborting writer:`, abortErr);
-            });
-            console.log(`[API Route /stream/${debateId}] Writer aborted due to error.`);
+            
+            // Check if this is a client disconnection error
+            if (err.message?.includes('closed') || err.code === 'ERR_INVALID_STATE') {
+                console.log(`[API Route /stream/${debateId}] Client disconnection detected, continuing background processing...`);
+                clientDisconnected = true;
+                // Don't treat client disconnection as a stream error for persistence purposes
+            } else {
+                streamError = err; // Only store as error if it's not a client disconnection
+                // Try to abort the writer, but don't fail if client is already disconnected
+                if (!clientDisconnected) {
+                    await writer.abort(err).catch(abortErr => {
+                         console.error(`[API Route /stream/${debateId}] Error aborting writer:`, abortErr);
+                    });
+                    console.log(`[API Route /stream/${debateId}] Writer aborted due to error.`);
+                }
+            }
         } finally {
              // Clean up interval regardless of success or failure
             if (pingIntervalId) {
@@ -390,7 +430,7 @@ Text: ${item.text}
 
             // --- Persist to Supabase ---
             if (streamError) {
-                // Handle failure
+                // Handle actual failure (not client disconnection)
                 console.error(`[API Route /stream/${debateId}] Stream failed. Updating status to 'failed'. Error: ${streamError.message}`);
                 const { error: updateError } = await supabase
                     .from('casual_debates_uwhatgov')
@@ -404,8 +444,12 @@ Text: ${item.text}
                     console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' in Supabase:`, updateError);
                 }
             } else if (hasSentValidSpeech && accumulatedSpeeches.length > 0) {
-                // Handle success
-                console.log(`[API Route /stream/${debateId}] Stream completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
+                // Handle success (regardless of whether client disconnected)
+                if (clientDisconnected) {
+                    console.log(`[API Route /stream/${debateId}] Background generation completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
+                                 } else {
+                     console.log(`[API Route /stream/${debateId}] Stream completed successfully with ${accumulatedSpeeches.length} speeches. Persisting to Supabase...`);
+                 }
                 const finalContent = {
                     title: debateTitle, // Use the title fetched earlier
                     speeches: accumulatedSpeeches
