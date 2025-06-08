@@ -40,7 +40,8 @@ export async function GET(
 
     // Access params *after* await
     const { params } = context; // Destructure params from context
-    const debateId = await params.debateId;
+    const awaitedParams = await params;
+    const debateId = awaitedParams.debateId;
 
     if (!user) {
         // Use debateId *after* checking for user, otherwise it might be undefined if accessed before await

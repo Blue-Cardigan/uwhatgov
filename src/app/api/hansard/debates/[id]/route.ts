@@ -12,7 +12,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: any } // Destructure directly, use any for params type
 ) {
-  const debateId = params.id as string; // Assert type here if needed
+  const awaitedParams = await params;
+  const debateId = awaitedParams.id as string; // Assert type here if needed
 
   if (!debateId) {
       return NextResponse.json({ error: 'Debate ID is required' }, { status: 400 });
