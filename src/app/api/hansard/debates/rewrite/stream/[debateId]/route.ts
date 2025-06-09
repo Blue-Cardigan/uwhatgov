@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getHansardDebate } from '@/lib/hansardService';
 import { generateDebateStream } from '@/lib/geminiService';
+import { updateDebateStatus } from '@/lib/debateInitService';
 import { GenerateContentStreamResult } from '@google/generative-ai';
 import { DebateContentItem } from '@/lib/hansard/types'; // Assuming types are here
 // Use the server client from @supabase/ssr
@@ -252,15 +253,12 @@ Text: ${item.text}
     let geminiStreamResult: GenerateContentStreamResult | null;
     try {
         // Update status to 'processing' before starting stream
-        const { error: statusUpdateError } = await supabase
-            .from('casual_debates_uwhatgov')
-            .update({ status: 'success', last_updated_at: new Date().toISOString() })
-            .eq('id', debateId);
-         if (statusUpdateError && statusUpdateError.code !== 'PGRST116') { // Ignore error if row doesn't exist yet
-             console.warn(`[API Route /stream/${debateId}] Failed to update status to success (might be new debate):`, statusUpdateError.message);
-         } else if (!statusUpdateError) {
-             console.log(`[API Route /stream/${debateId}] Updated status to success.`);
-         }
+        try {
+            await updateDebateStatus(debateId, 'processing');
+            console.log(`[API Route /stream/${debateId}] Updated status to processing.`);
+        } catch (statusError) {
+            console.warn(`[API Route /stream/${debateId}] Failed to update status to processing:`, statusError);
+        }
 
         geminiStreamResult = await generateDebateStream(combinedText, debateTitle, startIndex);
         if (!geminiStreamResult || !geminiStreamResult.stream) {
@@ -534,16 +532,10 @@ Text: ${item.text}
             if (streamError) {
                 // Handle failure
                 console.error(`[API Route /stream/${debateId}] Stream failed. Updating status to 'failed'. Error: ${streamError.message}`);
-                const { error: updateError } = await supabase
-                    .from('casual_debates_uwhatgov')
-                    .update({
-                        status: 'failed',
-                        error_message: streamError.message,
-                        last_updated_at: new Date().toISOString()
-                    })
-                    .eq('id', debateId);
-                if (updateError) {
-                    console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' in Supabase:`, updateError);
+                try {
+                    await updateDebateStatus(debateId, 'failed', null, streamError.message);
+                } catch (updateError) {
+                    console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed':`, updateError);
                 }
             } else if (hasSentValidSpeech && accumulatedSpeeches.length > 0) {
                 // Handle success
@@ -554,37 +546,25 @@ Text: ${item.text}
                 };
                 const contentString = JSON.stringify(finalContent);
 
-                const { error: upsertError } = await supabase
-                    .from('casual_debates_uwhatgov')
-                    .upsert({
-                        id: debateId,
-                        content: contentString,
-                        status: 'success', // Mark as success
-                        last_updated_at: new Date().toISOString(), // Explicitly set timestamp
-                        error_message: null // Clear any previous error message
-                    }, { onConflict: 'id' });
-
-                if (upsertError) {
-                    console.error(`[API Route /stream/${debateId}] Supabase upsert error:`, upsertError);
-                    // Optionally update status to 'failed' again if upsert fails
-                    await supabase.from('casual_debates_uwhatgov').update({ status: 'failed', error_message: `Upsert failed: ${upsertError.message}`, last_updated_at: new Date().toISOString() }).eq('id', debateId);
-                } else {
+                try {
+                    await updateDebateStatus(debateId, 'success', contentString, null);
                     console.log(`[API Route /stream/${debateId}] Persisted ${debateId} successfully.`);
+                } catch (updateError) {
+                    console.error(`[API Route /stream/${debateId}] Failed to update to success status:`, updateError);
+                    try {
+                        await updateDebateStatus(debateId, 'failed', null, `Update failed: ${updateError}`);
+                    } catch (failedUpdateError) {
+                        console.error(`[API Route /stream/${debateId}] Failed to update to failed status:`, failedUpdateError);
+                    }
                 }
             } else {
                 // Handle case where stream finished but produced no valid speeches
                 console.warn(`[API Route /stream/${debateId}] Stream completed but no valid speeches were generated/accumulated. Updating status to 'failed'.`);
-                 const { error: updateError } = await supabase
-                    .from('casual_debates_uwhatgov')
-                    .update({
-                        status: 'failed',
-                        error_message: 'Stream completed successfully but generated no valid content.',
-                        last_updated_at: new Date().toISOString()
-                    })
-                    .eq('id', debateId);
-                 if (updateError && updateError.code !== 'PGRST116'){ // Ignore if row doesn't exist
-                     console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' (no content) in Supabase:`, updateError);
-                 }
+                try {
+                    await updateDebateStatus(debateId, 'failed', null, 'Stream completed successfully but generated no valid content.');
+                } catch (updateError) {
+                    console.error(`[API Route /stream/${debateId}] Failed to update status to 'failed' (no content):`, updateError);
+                }
             }
         }
     };
@@ -633,7 +613,7 @@ Text: ${item.text}
     });
 
     // Return the readable stream for the initial requester
-    return new Response(initialStream.pipeThrough(new TextEncoderStream()), {
+    return new Response(initialStream, {
         headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-transform',

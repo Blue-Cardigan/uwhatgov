@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import { getHansardDebate } from '@/lib/hansardService';
+
 import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'edge';
@@ -14,6 +15,122 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   groundingMetadata?: any;
+}
+
+// Hansard API function definitions
+const hansardFunctions = [
+  {
+    name: "search_hansard",
+    description: "Search UK Parliament Hansard records for debates, contributions, written statements, and more. Use this for general parliamentary searches and member-specific searches.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        searchTerm: {
+          type: SchemaType.STRING,
+          description: "The term to search for. Can use advanced search directives like 'spokenby:name', 'debate:topic', 'words:text'. Optional when using memberId."
+        },
+        house: {
+          type: SchemaType.STRING,
+          description: "Parliamentary house to search (Commons or Lords)"
+        },
+        startDate: {
+          type: SchemaType.STRING,
+          description: "Start date for search (yyyy-mm-dd)"
+        },
+        endDate: {
+          type: SchemaType.STRING,
+          description: "End date for search (yyyy-mm-dd)"
+        },
+        memberId: {
+          type: SchemaType.INTEGER,
+          description: "Search for contributions by a specific member ID. Can be used alone or with searchTerm."
+        },
+        debateType: {
+          type: SchemaType.STRING,
+          description: "Type of debate to search"
+        },
+        take: {
+          type: SchemaType.INTEGER,
+          description: "Number of results to return (default 10, max 20)"
+        }
+      },
+      required: []
+    }
+  }
+];
+
+// Function to execute Hansard API calls
+async function executeHansardFunction(name: string, args: any) {
+  const baseUrl = 'https://hansard-api.parliament.uk/search';
+  
+  try {
+    let url: string;
+    let response: Response;
+
+    switch (name) {
+      case 'search_hansard':
+        {
+          const params = new URLSearchParams();
+          if (args.searchTerm) params.set('queryParameters.searchTerm', args.searchTerm);
+          if (args.house) params.set('queryParameters.house', args.house);
+          if (args.startDate) params.set('queryParameters.startDate', args.startDate);
+          if (args.endDate) params.set('queryParameters.endDate', args.endDate);
+          if (args.memberId) params.set('queryParameters.memberId', args.memberId.toString());
+          if (args.debateType) params.set('queryParameters.debateType', args.debateType);
+          if (args.take) params.set('queryParameters.take', Math.min(args.take, 20).toString());
+          else params.set('queryParameters.take', '10');
+          
+          url = `${baseUrl}.json?${params.toString()}`;
+          response = await fetch(url);
+        }
+        break;
+
+        break;
+
+      default:
+        throw new Error(`Unknown function: ${name}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Hansard API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // Format the response based on the API structure we discovered
+    const formattedData = {
+      totalMembers: data.TotalMembers,
+      totalContributions: data.TotalContributions,
+      totalWrittenStatements: data.TotalWrittenStatements,
+      totalWrittenAnswers: data.TotalWrittenAnswers,
+      totalCorrections: data.TotalCorrections,
+      totalPetitions: data.TotalPetitions,
+      totalDebates: data.TotalDebates,
+      totalCommittees: data.TotalCommittees,
+      totalDivisions: data.TotalDivisions,
+      searchTerms: data.SearchTerms,
+      members: data.Members || [],
+      contributions: data.Contributions || [],
+      debates: data.Debates || [],
+      committees: data.Committees || [],
+      divisions: data.Divisions || []
+    };
+
+    return {
+      success: true,
+      data: formattedData,
+      url: url.replace(/queryParameters\./g, ''), // Clean up URL for display
+      apiResponse: data // Include raw response for debugging if needed
+    };
+
+  } catch (error: any) {
+    console.error(`[Hansard Function] Error in ${name}:`, error);
+    return {
+      success: false,
+      error: error.message,
+      data: null
+    };
+  }
 }
 
 export async function POST(
@@ -95,6 +212,20 @@ export async function POST(
         text: (item.Value || '').replace(/<[^>]*>/g, '').trim().substring(0, 500) // Limit text length
       }));
 
+    // Extract member information for context
+    const memberMap = new Map();
+    originalDebate.Items
+      .filter(item => item.ItemType === 'Contribution' && item.MemberId && item.AttributedTo)
+      .forEach(item => {
+        if (!memberMap.has(item.MemberId)) {
+          memberMap.set(item.MemberId, item.AttributedTo);
+        }
+      });
+
+    const membersList = Array.from(memberMap.entries())
+      .map(([id, name]) => `${name} (ID: ${id})`)
+      .join(', ');
+
     const debateContext = `
 Debate Title: ${debateTitle}
 Date: ${debateDate}
@@ -102,6 +233,8 @@ House: ${debateHouse}
 
 Key Contributions:
 ${contributions.map(c => `${c.speaker}: ${c.text}`).join('\n\n')}
+
+Members in this debate: ${membersList}
 `;
 
     // Build conversation history for the model
@@ -115,28 +248,89 @@ ${contributions.map(c => `${c.speaker}: ${c.text}`).join('\n\n')}
       role: 'user',
       parts: [{ text: `Context: ${debateContext}
 
+######
+You are an AI assistant helping users understand UK Parliamentary debates. You have access to the current debate context and can search the UK Parliament Hansard API for additional parliamentary information.
 
-Answer this question based on the provided UK Parliamentary debate.
+Available tools:
+search_hansard: General search across all parliamentary records (can also search by member ID alone or combined with search terms)
 
-Use web search when needed to find relevant details. Focus on being factual and cite sources when possible.
+When users ask about:
+- Other debates or broader parliamentary topics → use search_hansard
+- What a specific MP has said → use search_hansard with their member ID
+- General questions about the current debate → use the provided context
+
+Member IDs are provided in the context above. Use these when searching for specific members.
+
+For EVERY query, you MUST use British English spelling in your responses.
 
 Question: ${message}` }]
     });
 
-    // Use Gemini 1.5 Flash (compatible with current package version)
+    // Use Gemini 2.0 Flash with function calling
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash"
+      model: "gemini-2.0-flash",
+      tools: [{ functionDeclarations: hansardFunctions }] as any
     });
 
     const result = await model.generateContent({
-      contents: conversationHistory,
+      contents: conversationHistory
     });
 
     const response = await result.response;
-    const responseText = response.text();
+    
+    // Handle function calls
+    const functionCalls = response.functionCalls();
+    let responseText = '';
+    
+    if (functionCalls && functionCalls.length > 0) {
+      // Execute function calls
+      const functionResults = await Promise.all(
+        functionCalls.map(async (functionCall) => {
+          const { name, args } = functionCall;
+          console.log(`[Chat API] Executing function: ${name}`, args);
+          const result = await executeHansardFunction(name, args);
+          return {
+            functionResponse: {
+              name,
+              response: result
+            }
+          };
+        })
+      );
 
-    // No grounding metadata available without tools
-    const groundingMetadata = null;
+      // Continue conversation with function results
+      const followUpConversation = [
+        ...conversationHistory,
+        {
+          role: 'model',
+          parts: functionCalls.map(fc => ({ functionCall: fc }))
+        },
+        {
+          role: 'function',
+          parts: functionResults
+        }
+      ];
+
+      const followUpResult = await model.generateContent({
+        contents: followUpConversation
+      });
+
+      responseText = followUpResult.response.text();
+    } else {
+      responseText = response.text();
+    }
+
+    // Extract grounding metadata from the response
+    let groundingMetadata = null;
+    if (response.candidates && response.candidates[0]?.groundingMetadata) {
+      const metadata = response.candidates[0].groundingMetadata;
+      groundingMetadata = {
+        searchEntryPoint: metadata.searchEntryPoint,
+        groundingChunks: metadata.groundingChunks || [],
+        groundingSupports: metadata.groundingSupports || [],
+        webSearchQueries: metadata.webSearchQueries || []
+      };
+    }
 
     // Store user message in database
     const { error: userMsgError } = await supabase
@@ -172,6 +366,31 @@ Question: ${message}` }]
       .update({ updated_at: new Date().toISOString() })
       .eq('id', conversationId);
 
+    // Check if this is the first assistant response and generate name if so
+    const messageCount = (chatHistory || []).length + 2; // +2 for current user + assistant messages
+    let generatedTitle = null;
+    
+    if (messageCount === 2) {
+      // This is the first assistant response, trigger name generation
+      try {
+        const nameResponse = await fetch(`${request.nextUrl.origin}/api/chat/conversations/${conversationId}/generate-name`, {
+          method: 'POST',
+          headers: {
+            'Authorization': request.headers.get('Authorization') || '',
+            'Cookie': request.headers.get('Cookie') || ''
+          }
+        });
+        
+        if (nameResponse.ok) {
+          const nameData = await nameResponse.json();
+          generatedTitle = nameData.title;
+        }
+      } catch (error) {
+        console.error('Failed to generate conversation name:', error);
+        // Don't fail the main request if name generation fails
+      }
+    }
+
     const assistantMessage: ChatMessage = {
       id: assistantMessageRecord?.id,
       role: 'assistant',
@@ -182,6 +401,7 @@ Question: ${message}` }]
 
     return NextResponse.json({
       message: assistantMessage,
+      generatedTitle,
       success: true
     });
 

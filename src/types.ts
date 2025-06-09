@@ -18,4 +18,25 @@ export interface InternalDebateSummary {
   house: string;
   match?: string; // Optional match snippet from search
   metadata?: DebateMetadata | null; // Optional detailed metadata
+}
+
+// API response for generating chat conversation names
+export interface GenerateNameResponse {
+  title: string;
+  success: boolean;
+  error?: string;
+}
+
+// API response for sending chat messages
+export interface ChatMessageResponse {
+  message: {
+    id?: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: string;
+    groundingMetadata?: any;
+  };
+  generatedTitle?: string | null;
+  success: boolean;
+  error?: string;
 } 

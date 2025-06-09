@@ -4,6 +4,7 @@ import { DebateResponse } from "@/lib/hansard/types";
 import { Speech, ReactionSummary } from "./ChatView";
 import { getPartyColorClass } from "@/lib/partyColors";
 import { ReactionBar } from './ReactionBar'; // Import ReactionBar
+import { parseMarkdown } from '@/utils/markdownParser';
 
 // MessageBubble component
 interface MessageBubbleProps {
@@ -265,8 +266,11 @@ export const MessageBubble = ({
                             <HighlightedText text={speech.speaker || 'Speaker'} query={searchQuery} />
                         </p>
                     </div>
-                    {/* Speech Text */}
-                    <p className="text-sm whitespace-pre-wrap"><HighlightedText text={speech.text} query={searchQuery} /></p>
+                    {/* Speech Text with Markdown Support */}
+                    <div 
+                        className="text-sm prose prose-sm prose-invert max-w-none" 
+                        dangerouslySetInnerHTML={{ __html: parseMarkdown(speech.text, searchQuery) }} 
+                    />
                 </div>
                  {/* Add placeholder for own message portrait if needed */} 
                  {isOwnMessage && <div className="w-8 flex-shrink-0"></div>} 

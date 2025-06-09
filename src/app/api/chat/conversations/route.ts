@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { ensureDebateRecord } from '@/lib/debateInitService';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -56,6 +57,9 @@ export async function POST(request: NextRequest) {
     if (!debateId || !title) {
       return NextResponse.json({ error: 'debateId and title are required' }, { status: 400 });
     }
+
+    // Ensure debate record exists before creating conversation
+    await ensureDebateRecord(debateId);
 
     const { data: conversation, error } = await supabase
       .from('chat_conversations_uwhatgov')

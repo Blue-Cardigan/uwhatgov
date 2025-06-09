@@ -17,7 +17,7 @@ import {
     originalSnippet: string;
   }
   
-  const MODEL_NAME = "gemini-1.5-flash";
+  const MODEL_NAME = "gemini-2.0-flash";
   const API_KEY = process.env.GOOGLE_API_KEY; // Ensure this is set in your Vercel env vars
   
   if (!API_KEY) {

@@ -2,6 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { parseMarkdown } from '@/utils/markdownParser';
+import GroundingDisplay from './GroundingDisplay';
+import { ChatMessageResponse } from '@/types';
 
 interface ChatMessage {
   id?: string;
@@ -75,55 +78,12 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load conversations when component mounts or debate changes
-  const loadConversations = useCallback(async () => {
-    if (!user || !debateId) return;
-
-    setIsLoadingConversations(true);
-    try {
-      const response = await fetch(`/api/chat/conversations?debateId=${debateId}`);
-      const data = await response.json();
-
-      if (response.ok) {
-        setConversations(data.conversations || []);
-        // Auto-select the most recent conversation
-        if (data.conversations?.length > 0) {
-          setSelectedConversation(data.conversations[0]);
-        }
-      } else {
-        throw new Error(data.error || 'Failed to load conversations');
-      }
-    } catch (err: any) {
-      console.error('Error loading conversations:', err);
-      setError(err.message);
-    } finally {
-      setIsLoadingConversations(false);
-    }
-  }, [user, debateId]);
-
-  // Load messages for selected conversation
-  const loadMessages = useCallback(async (conversationId: string) => {
-    try {
-      const response = await fetch(`/api/chat/conversations/${conversationId}/messages`);
-      const data = await response.json();
-
-      if (response.ok) {
-        setMessages(data.messages || []);
-      } else {
-        throw new Error(data.error || 'Failed to load messages');
-      }
-    } catch (err: any) {
-      console.error('Error loading messages:', err);
-      setError(err.message);
-    }
-  }, []);
-
   // Create new conversation
   const createNewConversation = useCallback(async () => {
     if (!user || !debateId) return;
 
     try {
-      const title = `Chat about ${debateTitle || 'Debate'} - ${new Date().toLocaleDateString()}`;
+      const title = `New Chat - ${new Date().toLocaleDateString()}`;
       
       const response = await fetch('/api/chat/conversations', {
         method: 'POST',
@@ -145,6 +105,61 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
       setError(err.message);
     }
   }, [user, debateId, debateTitle]);
+
+  // Load conversations when component mounts or debate changes
+  const loadConversations = useCallback(async () => {
+    if (!user || !debateId) return;
+
+    setIsLoadingConversations(true);
+    try {
+      const response = await fetch(`/api/chat/conversations?debateId=${debateId}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setConversations(data.conversations || []);
+        // Auto-select the most recent conversation or create one if none exist
+        if (data.conversations?.length > 0) {
+          setSelectedConversation(data.conversations[0]);
+        } else {
+          // No conversations exist, try to create one automatically for first-time users
+          try {
+            await createNewConversation();
+          } catch (createError: any) {
+            // If conversation creation fails (likely due to debate not being in casual_debates table),
+            // set a specific error state instead of crashing
+            console.warn('Failed to auto-create conversation:', createError);
+            setError('Chat is only available for debates that have been processed through the casual rewrite system. Please generate the casual version first.');
+          }
+        }
+      } else {
+        throw new Error(data.error || 'Failed to load conversations');
+      }
+    } catch (err: any) {
+      console.error('Error loading conversations:', err);
+      if (!error) { // Only set error if not already set from conversation creation
+        setError(err.message);
+      }
+    } finally {
+      setIsLoadingConversations(false);
+    }
+  }, [user, debateId, createNewConversation, error]);
+
+  // Load messages for selected conversation
+  const loadMessages = useCallback(async (conversationId: string) => {
+    try {
+      const response = await fetch(`/api/chat/conversations/${conversationId}/messages`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setMessages(data.messages || []);
+      } else {
+        throw new Error(data.error || 'Failed to load messages');
+      }
+    } catch (err: any) {
+      console.error('Error loading messages:', err);
+      setError(err.message);
+    }
+  }, []);
 
   // Send message
   const sendMessage = useCallback(async () => {
@@ -171,13 +186,30 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
         })
       });
 
-      const data = await response.json();
+      const data: ChatMessageResponse = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to send message');
       }
 
       setMessages(prev => [...prev, data.message]);
+      
+      // If a title was generated, update the conversation in the list
+      if (data.generatedTitle && selectedConversation) {
+        const updatedConversation = {
+          ...selectedConversation,
+          title: data.generatedTitle
+        };
+        
+        setSelectedConversation(updatedConversation);
+        setConversations(prev => 
+          prev.map(conv => 
+            conv.id === selectedConversation.id 
+              ? updatedConversation 
+              : conv
+          )
+        );
+      }
     } catch (err: any) {
       console.error('Chat error:', err);
       setError(err.message || 'Failed to send message');
@@ -188,6 +220,8 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
 
   // Load conversations when component mounts
   useEffect(() => {
+    // Clear error state when debateId changes
+    setError(null);
     loadConversations();
   }, [loadConversations]);
 
@@ -251,7 +285,7 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
             <option value="">Select conversation...</option>
             {conversations.map((conv) => (
               <option key={conv.id} value={conv.id}>
-                {conv.title} ({formatTimestamp(conv.updated_at)})
+                {conv.title}
               </option>
             ))}
           </select>
@@ -266,18 +300,13 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
             <p className="text-xs text-gray-400 mt-1">Loading conversations...</p>
           </div>
         ) : !selectedConversation ? (
-          <div className="text-center text-gray-500 py-4">
-            <p className="text-sm mb-2">No conversations yet</p>
-            <button
-              onClick={createNewConversation}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-xs"
-            >
-              Start chatting
-            </button>
+          <div className="text-center py-4">
+            <LoadingIcon />
+            <p className="text-xs text-gray-400 mt-1">Setting up chat...</p>
           </div>
         ) : messages.length === 0 ? (
           <div className="text-center text-gray-500 py-4">
-            <p className="text-xs">Ask your first question about this debate!</p>
+            <p className="text-xs">Research this debate</p>
           </div>
         ) : (
           messages.map((message, index) => (
@@ -292,7 +321,16 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
                     : 'bg-[#2a3942] text-gray-100'
                 }`}
               >
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div 
+                  className="prose prose-sm prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }}
+                />
+                
+                {/* Show grounding information for assistant messages */}
+                {message.role === 'assistant' && message.groundingMetadata && (
+                  <GroundingDisplay groundingMetadata={message.groundingMetadata} />
+                )}
+                
                 <div className={`text-xs mt-1 opacity-70 ${
                   message.role === 'user' ? 'text-indigo-200' : 'text-gray-400'
                 }`}>
@@ -307,16 +345,24 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
           <div className="flex justify-start">
             <div className="bg-[#2a3942] p-2 rounded flex items-center gap-2">
               <LoadingIcon />
-              <span className="text-gray-300 text-xs">Thinking...</span>
+              <span className="text-gray-300 text-xs">Searching and thinking...</span>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="text-center">
-            <div className="bg-red-900 text-red-200 p-2 rounded text-xs">
+          <div className="text-center p-4">
+            <div className="bg-yellow-900 text-yellow-200 p-3 rounded text-sm">
               {error}
             </div>
+            {error.includes('casual rewrite system') && (
+              <button
+                onClick={() => setChatMode('debate')}
+                className="mt-2 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-xs"
+              >
+                Go to Debate View
+              </button>
+            )}
           </div>
         )}
 
@@ -325,14 +371,13 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
 
       {/* Input */}
       <div className="p-3 border-t border-gray-700 bg-[#202c33]">
-        {selectedConversation ? (
           <div className="flex gap-2">
             <textarea
               ref={inputRef}
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask a question..."
+              placeholder="You what, gov?"
               className="flex-1 p-2 bg-[#2a3942] border border-gray-600 rounded text-white placeholder-gray-400 resize-none focus:outline-none focus:border-indigo-500 text-xs"
               rows={1}
               style={{ minHeight: '32px', maxHeight: '80px' }}
@@ -351,14 +396,6 @@ export default function IntegratedChat({ debateId, debateTitle, setChatMode }: I
               <SendIcon />
             </button>
           </div>
-        ) : (
-          <button
-            onClick={createNewConversation}
-            className="w-full p-2 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-xs"
-          >
-            Start a new conversation
-          </button>
-        )}
       </div>
     </div>
   );

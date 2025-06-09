@@ -260,16 +260,17 @@ export default function Home() {
       return;
     }
 
-    setSelectedDebateId(debateId);
-    setViewMode('rewritten');
-    setSelectedOriginalIndex(null);
-    setOriginalPanelHeight(43);
-    closeDebateSearch();
-    setSelectedDebateSummary(null);
-    setSummaryText(null);
-    setIsSummaryOpen(false);
-    setIsOptionsMenuOpen(false);
-    setIsMobileSidebarOpen(false);
+      setSelectedDebateId(debateId);
+  setViewMode('rewritten');
+  setSelectedOriginalIndex(null);
+  setOriginalPanelHeight(43);
+  closeDebateSearch();
+  setSelectedDebateSummary(null);
+  setSummaryText(null);
+  setIsSummaryOpen(false);
+  setIsOptionsMenuOpen(false);
+  setIsMobileSidebarOpen(false);
+  setChatMode('debate');
 
     router.push(`/?debateId=${debateId}`);
     
