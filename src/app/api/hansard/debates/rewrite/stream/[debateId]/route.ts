@@ -32,7 +32,7 @@ interface Speech {
 // Global map to track ongoing streams
 const ongoingStreams = new Map<string, {
     isGenerating: boolean;
-    subscribers: Set<ReadableStreamDefaultController<string>>;
+    subscribers: Set<ReadableStreamDefaultController<Uint8Array>>;
     lastActivity: number;
 }>();
 
@@ -66,8 +66,9 @@ async function handleSubscription(debateId: string, supabase: any) {
             // Already completed, send immediate complete
             const readable = new ReadableStream({
                 start(controller) {
+                    const encoder = new TextEncoder();
                     const completeEvent = { type: 'complete' };
-                    controller.enqueue(`data: ${JSON.stringify(completeEvent)}\n\n`);
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(completeEvent)}\n\n`));
                     controller.close();
                 }
             });
@@ -85,7 +86,7 @@ async function handleSubscription(debateId: string, supabase: any) {
     }
 
     // Subscribe to ongoing stream
-    let subscriberController: ReadableStreamDefaultController<string> | null = null;
+    let subscriberController: ReadableStreamDefaultController<Uint8Array> | null = null;
     const readable = new ReadableStream({
         start(controller) {
             subscriberController = controller;
@@ -94,8 +95,9 @@ async function handleSubscription(debateId: string, supabase: any) {
             streamInfo.lastActivity = Date.now();
             
             // Send initial ping to confirm connection
+            const encoder = new TextEncoder();
             const pingEvent = { type: 'ping' };
-            controller.enqueue(`data: ${JSON.stringify(pingEvent)}\n\n`);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(pingEvent)}\n\n`));
         },
         cancel() {
             console.log(`[API Stream /${debateId}] Subscriber disconnected`);
@@ -236,8 +238,9 @@ Text: ${item.text}
         // Return an empty stream or a specific message? Let's send a complete message.
         const readable = new ReadableStream({
             start(controller) {
+                const encoder = new TextEncoder();
                 const completeEvent: StreamEvent = { type: 'complete' };
-                controller.enqueue(`data: ${JSON.stringify(completeEvent)}\n\n`);
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(completeEvent)}\n\n`));
                 controller.close();
             }
         });
@@ -273,7 +276,7 @@ Text: ${item.text}
     // Initialize stream tracking
     const streamInfo = {
         isGenerating: true,
-        subscribers: new Set<ReadableStreamDefaultController<string>>(),
+        subscribers: new Set<ReadableStreamDefaultController<Uint8Array>>(),
         lastActivity: Date.now()
     };
     ongoingStreams.set(debateId, streamInfo);
@@ -290,11 +293,13 @@ Text: ${item.text}
     // Helper function to broadcast to all subscribers
     const broadcastToSubscribers = (data: string) => {
         streamInfo.lastActivity = Date.now();
-        const deadControllers = new Set<ReadableStreamDefaultController<string>>();
+        const deadControllers = new Set<ReadableStreamDefaultController<Uint8Array>>();
+        const encoder = new TextEncoder();
+        const encodedData = encoder.encode(data);
         
         for (const controller of streamInfo.subscribers) {
             try {
-                controller.enqueue(data);
+                controller.enqueue(encodedData);
             } catch (_error) {
                 console.log(`[API Route /stream/${debateId}] Removing dead subscriber controller`);
                 deadControllers.add(controller);
@@ -325,7 +330,7 @@ Text: ${item.text}
     };
 
     // The TransformStream now expects validated Speech objects, not raw chunks
-    const transformStream = new TransformStream<Speech, string>({
+    const transformStream = new TransformStream<Speech, Uint8Array>({
         start(controller) {
             console.log(`[API Route /stream/${debateId}] SSE Transformer started.`);
             // Start sending pings
@@ -333,7 +338,8 @@ Text: ${item.text}
                  const pingEvent: StreamEvent = { type: 'ping' };
                  // Escape newline characters in the JSON string for SSE data field
                  const formattedData = JSON.stringify(pingEvent).replace(/\n/g, '\\n');
-                 controller.enqueue(`data: ${formattedData}\n\n`);
+                 const encoder = new TextEncoder();
+                 controller.enqueue(encoder.encode(`data: ${formattedData}\n\n`));
                  console.log(`[API Route /stream/${debateId}] Sent ping.`);
             }, PING_INTERVAL_MS);
         },
@@ -367,7 +373,8 @@ Text: ${item.text}
                 // Optionally send an error event downstream
                 const errorEvent: StreamEvent = { type: 'error', payload: { message: `Error processing speech object: ${error.message}` } };
                 const formattedErrorData = JSON.stringify(errorEvent).replace(/\n/g, '\n');
-                controller.enqueue(`data: ${formattedErrorData}\n\n`);
+                const encoder = new TextEncoder();
+                controller.enqueue(encoder.encode(`data: ${formattedErrorData}\n\n`));
             }
         },
         // Flush is called when the writable side is closed
@@ -573,7 +580,7 @@ Text: ${item.text}
     pipeGeneratorToStream();
 
     // Create a response stream for the initial requester that consumes the transform stream
-    let initialController: ReadableStreamDefaultController<string> | null = null;
+    let initialController: ReadableStreamDefaultController<Uint8Array> | null = null;
     
     // Connect the transform stream's readable side to consume it and prevent backpressure
     const transformReader = transformStream.readable.getReader();
@@ -601,8 +608,9 @@ Text: ${item.text}
             streamInfo.subscribers.add(controller);
             
             // Send initial ping
+            const encoder = new TextEncoder();
             const pingEvent = { type: 'ping' };
-            controller.enqueue(`data: ${JSON.stringify(pingEvent)}\n\n`);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(pingEvent)}\n\n`));
         },
         cancel() {
             console.log(`[API Stream /${debateId}] Initial requester disconnected`);
